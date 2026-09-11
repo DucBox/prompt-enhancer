@@ -241,6 +241,62 @@ class TestBuildSubJson(unittest.TestCase):
                     self.assertIn(value, sub["checklist"],
                                  "{}: thiếu '{}' trong checklist".format(level, value))
 
+    def test_duplicate_rank0_subjects_are_not_dropped_across_members(self):
+        """Chốt chặn cho bug thật (server test_3): 2 người phụ nữ trong cùng một
+        nhóm cùng bắt đầu bằng 'người phụ nữ' -- dedup toàn nhóm từng xoá mất
+        chủ ngữ người thứ hai, khiến model tự suy luận đúng theo cardinality
+        nhưng bị 2b chấm oan là 'thêm tin' vì checklist không còn dấu vết."""
+        target = {
+            "high_level_description": "Ba du khách trên thuyền.",
+            "style_description": {"medium": "photograph", "photo": "wide"},
+            "compositional_deconstruction": {
+                "background": "Sông nước.",
+                "elements": [
+                    {"id": 0, "type": "obj", "desc": "Người đàn ông tóc đen."},
+                    {"id": 1, "type": "obj", "desc": "Người phụ nữ tóc vàng buộc sau."},
+                    {"id": 2, "type": "obj", "desc": "Người phụ nữ tóc vàng khác."},
+                ],
+            },
+        }
+        decomp = {
+            "concept_groups": [{"name": "nhóm du khách", "member_ids": [0, 1, 2],
+                                "cardinality": "exact:3", "cultural": False}],
+            "facts": {
+                "0": [{"rank": 0, "kind": "subject", "text": "người đàn ông"},
+                      {"rank": 1, "kind": "color", "text": "tóc đen"}],
+                "1": [{"rank": 0, "kind": "subject", "text": "người phụ nữ"},
+                      {"rank": 1, "kind": "attribute", "text": "tóc vàng buộc sau"}],
+                "2": [{"rank": 0, "kind": "subject", "text": "người phụ nữ"},
+                      {"rank": 1, "kind": "attribute", "text": "tóc vàng khác"}],
+            },
+        }
+        sub = s1b.build_subjson("x", target, decomp, "long", random.Random("s"))
+        facts = sub["groups"][0]["facts"]
+        self.assertEqual(facts.count("người phụ nữ"), 2,
+                         "chủ ngữ người phụ nữ thứ hai bị xoá mất: {}".format(facts))
+        self.assertIn("tóc vàng khác", facts)
+
+    def test_cultural_group_name_in_checklist_even_with_facts(self):
+        """Chốt chặn cho bug thật (server test_3): tên nhóm văn hoá trước đây chỉ
+        được thêm vào checklist khi nhóm KHÔNG có facts nào. 'thanh đồng trong lễ
+        Hầu đồng' có 8 facts (áo, mũ, quạt...) nên tên nhóm bị bỏ sót hoàn toàn,
+        khiến model viết đúng tên văn hoá vẫn bị 2b chấm là 'thêm tin'."""
+        target = {
+            "high_level_description": "Một thanh đồng trong lễ Hầu đồng.",
+            "style_description": {"medium": "photograph", "photo": "wide"},
+            "compositional_deconstruction": {
+                "background": "Đền thờ.",
+                "elements": [{"id": 0, "type": "obj", "desc": "Áo thụng lụa xanh."}],
+            },
+        }
+        decomp = {
+            "concept_groups": [{"name": "thanh đồng trong lễ Hầu đồng", "member_ids": [0],
+                                "cardinality": "exact:1", "cultural": True}],
+            "facts": {"0": [{"rank": 0, "kind": "subject", "text": "áo thụng lụa xanh"}]},
+        }
+        sub = s1b.build_subjson("x", target, decomp, "long", random.Random("s"))
+        self.assertIn("thanh đồng trong lễ Hầu đồng", sub["checklist"])
+
     def test_first_clause_compression(self):
         self.assertEqual(
             s1b.first_clause("Quảng trường Ba Đình rộng; bầu trời trong xanh"),

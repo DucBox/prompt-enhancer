@@ -210,8 +210,13 @@ def build_subjson(
 
         member_ids = group.get("member_ids", []) or []
         group_facts: List[str] = []
-        seen = set()
 
+        # KHÔNG dedup theo chữ trên toàn nhóm. Hai thành viên khác nhau (2 phụ nữ,
+        # 2 chiếc bông tai...) rất hay cùng chung rank0 ("người phụ nữ", "bông tai
+        # vàng"). Dedup toàn nhóm sẽ xoá mất chủ ngữ của thành viên thứ hai, chỉ còn
+        # trơ thuộc tính không rõ thuộc về ai -- rồi model đọc đúng `cardinality` và
+        # tự suy ra người/vật còn thiếu, nhưng checklist mất dấu vết nên bị chấm oan
+        # là "thêm tin".
         for element_id in member_ids:
             if n_elements_used >= element_cap:
                 break
@@ -220,17 +225,17 @@ def build_subjson(
                 continue
             n_elements_used += 1
             for fact in select_facts(element_facts, max_rank):
-                text = fact["text"]
-                if text in seen:
-                    continue
-                seen.add(text)
-                group_facts.append(text)
+                group_facts.append(fact["text"])
                 n_facts_kept += 1
 
-        # Nhóm văn hoá có thể không gắn với element nào (ví dụ tên địa danh).
+        # Tên nhóm luôn được thêm vào checklist -- không chỉ khi group_facts rỗng.
+        # Với nhóm văn hoá, đây là thứ quan trọng nhất cần verify (đúng tên gọi
+        # Việt Nam), nên bắt buộc có mặt kể cả khi nhóm đã có sẵn nhiều facts khác.
         if not group_facts:
             group_facts = [group["name"]]
             n_facts_kept += 1
+        elif group.get("cultural") and group["name"] not in group_facts:
+            group_facts = [group["name"]] + group_facts
 
         entry = {
             "name": group["name"],
