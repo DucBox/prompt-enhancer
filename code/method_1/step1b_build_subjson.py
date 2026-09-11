@@ -92,6 +92,19 @@ def parse_args() -> argparse.Namespace:
     return io_utils.add_common_args(p).parse_args()
 
 
+
+# Cắt cứng theo số từ hay để lại một cụm CỤT giữa chừng (vd "...on the", "...post"
+# thay vì "...post fence") -- bug thật (server test_6): checklist đòi model nhắc
+# đúng nguyên văn một cụm không trọn nghĩa như vậy, không ai viết prompt lại chèn
+# một câu bị cắt cụt. Sau khi cắt theo max_words, lùi lại bỏ các từ chức năng
+# (giới từ/mạo từ) còn treo lơ lửng ở cuối, để cụm giữ lại luôn kết thúc trọn nghĩa.
+_DANGLING_TAIL_WORDS = {
+    "a", "an", "the", "on", "in", "at", "of", "with", "by", "from", "to",
+    "behind", "above", "below", "under", "near", "for", "and", "or", "but",
+    "into", "onto", "over", "through", "across", "toward", "towards",
+}
+
+
 def first_clause(text: str, max_words: int = 12) -> str:
     """Cắt lấy mệnh đề đầu — cách nén văn bản nền/phong cách bằng code thuần."""
     s = str(text or "").strip()
@@ -101,7 +114,10 @@ def first_clause(text: str, max_words: int = 12) -> str:
             break
     words = s.split()
     if len(words) > max_words:
-        s = " ".join(words[:max_words])
+        words = words[:max_words]
+        while words and words[-1].lower().strip(".,") in _DANGLING_TAIL_WORDS:
+            words.pop()
+        s = " ".join(words)
     return s.rstrip(".").strip()
 
 
@@ -170,7 +186,12 @@ def build_scene(target: Dict[str, Any], level: str) -> Dict[str, Any]:
     if "lighting" in fields and style.get("lighting"):
         scene["anh_sang"] = first_clause(style["lighting"], 8)
     if "aesthetics" in fields and style.get("aesthetics"):
-        scene["khong_khi"] = style["aesthetics"]
+        # aesthetics là một DANH SÁCH TAG mood tiếng Anh rời rạc (vd "elegant,
+        # historical, serene"), không phải câu mô tả -- không ai viết prompt lại
+        # liệt kê 3 tính từ cách nhau bằng dấu phẩy kiểu gắn nhãn mood-board.
+        # Chỉ giữ tag đầu (nổi bật nhất theo salience) làm GỢI Ý cho 2a viết,
+        # và KHÔNG bắt buộc trong checklist chấm điểm (xem SCENE_HINT_ONLY_KEYS).
+        scene["khong_khi"] = first_clause(style["aesthetics"], 3)
 
     keep_bg = cfg["keep_background"]
     background = comp.get("background")
@@ -375,7 +396,12 @@ def build_subjson(
     # scene (góc chụp, ánh sáng, bối cảnh...) cũng là thông tin đưa cho model 2a viết prompt,
     # nên PHẢI có mặt trong checklist — thiếu nó thì mọi câu nhắc tới ánh sáng/bối cảnh
     # sẽ bị step 2b chấm oan là "thêm tin" dù thực ra 2a chỉ đang tả đúng phần được cấp.
-    checklist.extend(v for v in scene.values() if v)
+    #
+    # NGOẠI LỆ: "khong_khi" (aesthetics/mood) chỉ là GỢI Ý văn phong cho 2a, không phải
+    # nội dung cụ thể để 2b chấm điểm -- gây 71% prompt long bị loại oan (server test_6)
+    # vì đây vốn là một danh sách tag mood tiếng Anh rời rạc, không phải câu mô tả mà
+    # người dùng thật sẽ nói ra.
+    checklist.extend(v for k, v in scene.items() if v and k != "khong_khi")
 
     return {
         "id": row_id,

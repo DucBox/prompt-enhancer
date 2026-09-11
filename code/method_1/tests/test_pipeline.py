@@ -352,13 +352,42 @@ class TestBuildSubJson(unittest.TestCase):
     def test_checklist_includes_scene_values(self):
         """Chốt chặn cho bug thật: 2a được cấp scene để viết prompt, nên checklist ở
         2b PHẢI chứa scene — thiếu nó thì mọi câu tả ánh sáng/bối cảnh bị chấm oan
-        là 'thêm tin' dù model chỉ đang tả đúng phần được cấp."""
+        là 'thêm tin' dù model chỉ đang tả đúng phần được cấp.
+
+        NGOẠI LỆ: khong_khi (aesthetics) chỉ là gợi ý văn phong cho 2a, không bắt
+        buộc trong checklist chấm điểm của 2b (xem test_khong_khi_is_hint_only_...)."""
         for level in ("short", "medium", "long"):
             sub = self.build(level)
-            for value in sub["scene"].values():
-                if value:
+            for key, value in sub["scene"].items():
+                if value and key != "khong_khi":
                     self.assertIn(value, sub["checklist"],
                                  "{}: thiếu '{}' trong checklist".format(level, value))
+
+    def test_khong_khi_is_hint_only_not_in_checklist(self):
+        """Chốt chặn cho bug thật (server test_6): aesthetics là danh sách tag mood
+        tiếng Anh rời rạc (vd 'elegant, historical, serene'), không phải câu mô tả
+        -- bắt buộc trong checklist gây 71% prompt long bị loại oan. Giữ làm gợi ý
+        cho 2a viết nhưng KHÔNG chấm điểm ở 2b."""
+        sub = self.build("long")
+        self.assertIn("khong_khi", sub["scene"])
+        self.assertNotIn(sub["scene"]["khong_khi"], sub["checklist"])
+
+    def test_khong_khi_keeps_only_first_tag(self):
+        target = dict(SAMPLE_TARGET)
+        target["style_description"] = dict(SAMPLE_TARGET["style_description"])
+        target["style_description"]["aesthetics"] = "elegant, historical, serene"
+        scene = s1b.build_scene(target, "long")
+        self.assertEqual(scene["khong_khi"], "elegant")
+
+    def test_first_clause_does_not_leave_dangling_preposition(self):
+        """Chốt chặn cho bug thật (server test_6): cắt cứng theo số từ từng để lại
+        cụm cụt lửng ('...on the'), không ai viết prompt lại chèn một câu bị cắt
+        cụt như vậy."""
+        text = ("A dark interior space framed by a heavy brown wooden door frame "
+                "on the left")
+        clause = s1b.first_clause(text, 14)
+        self.assertFalse(clause.split()[-1].lower() in s1b._DANGLING_TAIL_WORDS)
+        self.assertEqual(clause, "A dark interior space framed by a heavy brown wooden door frame")
 
     def test_default_medium_photograph_excluded_from_scene(self):
         """Chốt chặn cho bug thật (server test_5): medium=='photograph' chiếm 994/1000

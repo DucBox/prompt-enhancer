@@ -398,6 +398,41 @@ element type=="text":  31/7831 = 0,4%  (hiếm hơn dự kiến)</pre>
     nhóm bắt đầu bằng một danh từ tập hợp (đôi/cặp/bộ/cụm...).
   </div>
 
+  <div class="callout">
+    <div class="t">Soi lại toàn bộ 81 lượt loại ở test_6 theo đúng nguồn gốc mệnh đề</div>
+    Hai fix trên chỉ chạm tới một phần nhỏ. Đối chiếu từng mệnh đề "thiếu" với đúng
+    trường gốc của nó (<code>lighting</code> / <code>photo</code> / <code>aesthetics</code> /
+    <code>background</code>) cho bức tranh đầy đủ hơn:
+    <pre style="margin:2mm 0">nguồn                    số lượt   số prompt dính
+group_fact (nội dung element)  210         37
+boi_canh (bối cảnh nền)         40         40
+anh_sang (ánh sáng)             39         39
+khong_khi (aesthetics)          24         24   ← chỉ ở long
+goc_chup (góc máy)              18         18
+số lượng                         8          8</pre>
+    27/81 prompt bị loại <strong>chỉ vì</strong> scene (không dính lỗi nội dung khác) —
+    riêng nhóm này sửa xong đã cứu được khoảng 1/3. Đào tiếp hai nguồn lớn nhất lộ ra
+    2 vấn đề nữa:
+    <br><br>
+    <strong>1. Cắt cứng theo số từ để lại cụm cụt (bug thật).</strong>
+    <code>first_clause()</code> áp dụng cho bối cảnh nền (medium) từng cắt giữa câu, ví dụ
+    <em>"...framed by a heavy brown wooden door frame on the"</em> — mất chữ "left", cụt
+    lửng. Không ai viết prompt lại chèn một câu bị cắt cụt như vậy. Sửa: sau khi cắt theo
+    số từ, lùi lại bỏ các từ chức năng (giới từ/mạo từ: on, the, of, by...) còn treo lơ
+    lửng ở cuối.
+    <br><br>
+    <strong>2. <code>khong_khi</code> (aesthetics) là danh sách tag mood tiếng Anh rời
+    rạc</strong> (vd "elegant, historical, serene"), không phải câu mô tả — gây 71% prompt
+    long bị loại (24/34). Sau khi hỏi ý kiến, quyết định: chỉ giữ MỘT tag nổi bật nhất làm
+    gợi ý văn phong cho bước 2a viết, và <strong>không đưa vào checklist chấm điểm</strong>
+    ở bước 2b nữa — giống cách xử lý "loai_anh"/"goc_chup" mặc định.
+    <br><br>
+    <span class="muted">Phần còn lại (210 lượt "group_fact", 37 prompt) là nội dung cốt lõi
+    của element — màu sắc, chất liệu, vị trí — nhiều khả năng là chất lượng viết thật của
+    model (đúng việc bước 2b cần bắt), không phải lỗi pipeline; chưa thấy mẫu hình hệ thống
+    nào đáng sửa thêm ở đây.</span>
+  </div>
+
   <div class="ex-lbl">Ví dụ — cùng một ảnh, hai mức nén</div>
 <pre>Ảnh gốc: chợ nổi Cái Răng — 7 element, trong đó có cả một
          element 17 từ tả "cái xô nhựa đỏ trên boong thuyền"
