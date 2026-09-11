@@ -250,6 +250,34 @@ class TestBuildSubJson(unittest.TestCase):
                 self.assertNotIn("cảnh nền", c.replace("số lượng: ", "")) if c.startswith(
                     "số lượng:") else None
 
+    def test_collective_noun_group_name_suppresses_count_constraint(self):
+        """Chốt chặn cho bug thật (server test_6): tên nhóm là danh từ tập hợp/cặp
+        (vd 'đôi đũa', 'đôi bàn tay') đã tự mang nghĩa 'một cặp' -- ghép thêm số n
+        (đếm số member nguyên tử) phía trước sẽ ra khẳng định số lượng SAI
+        ('đôi đũa' + n=2 -> 'số lượng: 2 đôi đũa' = 4 chiếc, trong khi ảnh chỉ có
+        1 đôi/2 chiếc). Không ai đặt hàng ảnh lại nói câu này, và nó còn sai."""
+        target = {
+            "high_level_description": "x",
+            "style_description": {"medium": "photograph", "photo": "wide"},
+            "compositional_deconstruction": {"background": "", "elements": [
+                {"id": 0, "type": "obj", "desc": "a"},
+                {"id": 1, "type": "obj", "desc": "b"},
+            ]},
+        }
+        decomp = {
+            "concept_groups": [
+                {"name": "đôi đũa", "member_ids": [0, 1],
+                 "cardinality": "exact:2", "cultural": True},
+            ],
+            "facts": {
+                "0": [{"rank": 0, "kind": "subject", "text": "chiếc đũa"}],
+                "1": [{"rank": 0, "kind": "subject", "text": "chiếc đũa"}],
+            },
+        }
+        sub = s1b.build_subjson("x", target, decomp, "long", random.Random("s"))
+        for c in sub["checklist"]:
+            self.assertFalse(c.startswith("số lượng:"), c)
+
     def test_group_with_many_members_is_capped_in_short(self):
         """Chốt chặn cho bug thật (server test_3): nhóm chính nhiều thành viên
         (vd '3 người trên thuyền') từng gộp hết vào short, ra hàng chục mệnh đề
@@ -368,6 +396,18 @@ class TestBuildSubJson(unittest.TestCase):
         target["style_description"]["photo"] = "high-angle wide shot, deep focus"
         scene = s1b.build_scene(target, "long")
         self.assertIn("high-angle", scene.get("goc_chup", ""))
+
+    def test_boring_eye_level_stripped_from_notable_angle_clause(self):
+        """Chốt chặn cho bug thật (server test_6): dữ liệu gốc không nhất quán --
+        có ảnh viết 'eye-level wide shot' dính liền (không dấu phẩy tách). Nếu giữ
+        nguyên cả cụm thì 'eye-level' (mặc định, bị STEP2A_SYSTEM cấm) vẫn lọt vào
+        checklist cùng từ khoá đáng chú ý, khiến model đúng luật (bỏ qua) nhưng bị
+        chấm oan là thiếu 'eye-level wide shot'."""
+        target = dict(SAMPLE_TARGET)
+        target["style_description"] = dict(SAMPLE_TARGET["style_description"])
+        target["style_description"]["photo"] = "eye-level wide shot, deep focus"
+        scene = s1b.build_scene(target, "long")
+        self.assertEqual(scene.get("goc_chup"), "wide shot")
 
     def test_duplicate_rank0_subjects_are_not_dropped_across_members(self):
         """Chốt chặn cho bug thật (server test_3): 2 người phụ nữ trong cùng một

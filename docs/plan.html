@@ -377,6 +377,27 @@ element type=="text":  31/7831 = 0,4%  (hiếm hơn dự kiến)</pre>
     khi chỉ là góc mặc định (eye-level, medium shot, deep/sharp focus).
   </div>
 
+  <div class="callout">
+    <div class="t">Hai sự cố tiếp theo phát hiện ở test_6 (sau khi sửa scene ở trên)</div>
+    Chạy lại full pipeline: pass rate nhích lên 83%/70%/66% (short/medium/long) — đỡ hơn
+    hẳn nhưng vẫn còn hai lỗi hẹp:
+    <br><br>
+    <strong>1. Dữ liệu gốc ghi góc máy không nhất quán.</strong> Có ảnh viết
+    "eye-level, wide shot" (tách bằng dấu phẩy), có ảnh viết dính liền
+    "eye-level wide shot" (không dấu phẩy). Ở trường hợp dính liền, việc giữ nguyên
+    cả cụm khiến "eye-level" (mặc định, bị cấm) vẫn lọt theo cùng từ khoá đáng chú ý.
+    Sửa: cắt bỏ các từ mặc định (eye-level) ra khỏi cụm trước khi đưa vào checklist,
+    chỉ giữ lại đúng phần đáng chú ý ("wide shot").
+    <br><br>
+    <strong>2. Ràng buộc số lượng sai khi tên nhóm đã là danh từ tập hợp/cặp.</strong>
+    Với nhóm tên "đôi đũa" (đã tự mang nghĩa "một cặp") có 2 member, code từng ghép
+    thẳng "số lượng: 2 đôi đũa" — đọc thành "2 <em>cặp</em> đũa" (4 chiếc), trong khi
+    ảnh chỉ có đúng 1 đôi (2 chiếc). Bug lộ rõ nhất ở ảnh Cầu Vàng: "đôi bàn tay đá
+    khổng lồ" chỉ có 1 đôi (2 bàn tay) nhưng checklist ghi "2 đôi bàn tay" — sai và
+    không ai đặt hàng ảnh lại nói câu này. Sửa: bỏ hẳn ràng buộc số lượng khi tên
+    nhóm bắt đầu bằng một danh từ tập hợp (đôi/cặp/bộ/cụm...).
+  </div>
+
   <div class="ex-lbl">Ví dụ — cùng một ảnh, hai mức nén</div>
 <pre>Ảnh gốc: chợ nổi Cái Răng — 7 element, trong đó có cả một
          element 17 từ tả "cái xô nhựa đỏ trên boong thuyền"

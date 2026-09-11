@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import random
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -120,18 +121,30 @@ NOTABLE_ANGLE_KEYWORDS = (
     "aerial", "bird's-eye", "bird's eye", "overhead", "top-down",
     "drone", "from above", "from below", "worm's-eye", "worm's eye",
     "close-up", "closeup", "extreme close-up", "macro",
-    "wide shot", "full shot", "dutch angle",
+    "wide shot", "full shot", "full-body shot", "full body shot", "dutch angle",
+    "wide-angle", "wide angle", "ultra-wide", "ultrawide", "fisheye", "telephoto",
 )
+
+# Nguồn dữ liệu không nhất quán: có ảnh viết "eye-level, wide shot" (2 mệnh đề tách
+# riêng bằng dấu phẩy), có ảnh viết "eye-level wide shot" (dính liền, không dấu phẩy).
+# Ở trường hợp dính liền, nếu giữ nguyên cả cụm thì "eye-level" (mặc định, bị cấm)
+# vẫn lọt vào checklist cùng từ khoá đáng chú ý -- phải cắt bỏ phần mặc định này ra
+# khỏi cụm trước khi đưa vào checklist.
+_BORING_ANGLE_WORDS = ("eye-level", "eye level")
 
 
 def notable_angle_clause(shot: str) -> Optional[str]:
     """Trả về mệnh đề chứa từ khoá góc máy đáng chú ý, hoặc None nếu góc máy mặc định."""
     s = str(shot or "")
-    low = s.lower()
     for clause in s.split(","):
         clause_low = clause.lower()
         if any(kw in clause_low for kw in NOTABLE_ANGLE_KEYWORDS):
-            return clause.strip().rstrip(".")
+            cleaned = clause.strip().rstrip(".")
+            for boring in _BORING_ANGLE_WORDS:
+                cleaned = re.sub(re.escape(boring), "", cleaned, flags=re.IGNORECASE)
+            cleaned = cleaned.strip(" ,-")
+            if cleaned:
+                return cleaned
     return None
 
 
@@ -336,8 +349,19 @@ def build_subjson(
         checklist.extend(group_facts)
 
         # Ràng buộc số lượng chỉ phát khi đếm được chính xác và có từ 2 cá thể trở lên.
+        # BỎ QUA khi tên nhóm đã là danh từ tập hợp/cặp (đôi, cặp, bộ...) -- lúc đó
+        # "n" đang đếm số MEMBER nguyên tử (vd 2 chiếc đũa), còn tên nhóm đã tự mang
+        # nghĩa "một cặp/bộ" rồi. Ghép thẳng "{n} {tên}" sẽ ra một khẳng định số lượng
+        # khác hẳn và thường SAI (vd "đôi đũa" + n=2 -> "2 đôi đũa" = 4 chiếc, trong khi
+        # ảnh chỉ có đúng 1 đôi/2 chiếc). Bug thật thấy ở test_6: cau_vang_000914
+        # ("đôi bàn tay đá khổng lồ" -- chỉ có 1 đôi/2 bàn tay -- bị ghi thành "2 đôi").
         card = group.get("cardinality", "vague")
-        if card.startswith("exact:"):
+        name_lower = group["name"].strip().lower()
+        is_collective_name = any(
+            name_lower.startswith(prefix)
+            for prefix in ("đôi ", "cặp ", "bộ ", "cụm ", "chuỗi ", "xâu ", "dãy ")
+        )
+        if card.startswith("exact:") and not is_collective_name:
             try:
                 n = int(card.split(":", 1)[1])
             except ValueError:
