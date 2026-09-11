@@ -311,22 +311,49 @@ element type=="text":  31/7831 = 0,4%  (hiếm hơn dự kiến)</pre>
     <tr><th style="width:20mm">Mức</th><th style="width:46mm">Bề rộng</th><th>Chiều sâu</th>
         <th style="width:24mm">Độ dài</th></tr>
     <tr><td><strong>short</strong></td>
-        <td>Nhóm chính + mọi nhóm văn hoá Việt + mọi chữ trong ảnh</td>
-        <td>Chỉ chủ thể + 1 thuộc tính <span class="muted">(f0–f1)</span></td>
+        <td>Nhóm chính + tối đa <strong>2</strong> nhóm văn hoá Việt + mọi chữ trong ảnh</td>
+        <td>Chỉ chủ thể + 1 thuộc tính <span class="muted">(f0–f1)</span>; mỗi nhóm tối đa
+            <strong>2</strong> thành viên (nhóm chính: 3)</td>
         <td>8–20 từ</td></tr>
     <tr><td><strong>medium</strong></td>
-        <td>40–60% số nhóm, thêm gợi ý bối cảnh</td>
-        <td>1–2 thuộc tính mỗi element</td>
+        <td>40–60% số nhóm, tối đa <strong>3</strong> nhóm văn hoá, thêm gợi ý bối cảnh</td>
+        <td>1–2 thuộc tính mỗi element; mỗi nhóm tối đa <strong>4</strong> thành viên
+            (nhóm chính: 5)</td>
         <td>30–60 từ</td></tr>
     <tr><td><strong>long</strong></td>
-        <td>55–95% số nhóm <span class="muted">(ngẫu nhiên)</span></td>
-        <td>2–3 thuộc tính; riêng chủ thể chính giữ gần đủ</td>
+        <td>55–95% số nhóm <span class="muted">(ngẫu nhiên)</span>, không giới hạn nhóm văn hoá</td>
+        <td>2–3 thuộc tính; riêng chủ thể chính giữ gần đủ; không giới hạn số thành viên/nhóm</td>
         <td>100–200 từ</td></tr>
   </table>
 
   <p><span class="muted">Đuôi 95% của mức <em>long</em> chính là tình huống user viết cực chi tiết —
   khi đó việc của model gần như chỉ là bóc tách và dựng lại JSON. Đây là một điểm trên phổ,
   không phải một chế độ riêng.</span></p>
+
+  <div class="callout">
+    <div class="t">Sự cố thực tế: short/medium dài hơn hẳn mục tiêu</div>
+    Chạy thử trên dữ liệu server cho thấy prompt <em>short</em> ra tới ~22 từ (mục tiêu 8–20),
+    <em>medium</em> có lúc chạm 88 từ (mục tiêu 30–60). Nguyên nhân không phải ở bước 2a mà ở
+    checklist quá to do bước 1b lắp ra. Ba lỗi cụ thể:
+    <br><br>
+    <strong>1. Nhóm "bao trọn" bị giữ hết chỉ vì lẫn một mẩu chữ.</strong>
+    Một nhóm cảnh nền gộp 13 element không liên quan, tình cờ chứa 1 element chữ (biển hiệu) —
+    luật "giữ mọi chữ trong ảnh" khi đó kéo theo toàn bộ 13 element. Sửa: chỉ giữ đúng phần tử
+    chữ trong nhóm đó, không giữ cả nhóm.
+    <br><br>
+    <strong>2. Không có trần cho số thành viên một nhóm.</strong> Nhóm chính "ba người trên
+    thuyền thúng" một mình đóng góp 12 mệnh đề ở mức short. Sửa: thêm trần cứng theo mức
+    (bảng bên trên).
+    <br><br>
+    <strong>3. Luật "giữ mọi nhóm văn hoá" không có trần.</strong> Một ảnh có 4 nhóm được gắn
+    cờ văn hoá thì cả 4 đều lọt vào short, dù bề rộng mục tiêu của short chỉ là ~1 nhóm.
+    Sửa: thêm trần theo mức, ưu tiên giữ nhóm có độ nổi bật cao hơn (xuất hiện sớm hơn) khi
+    phải loại bớt.
+    <br><br>
+    <span class="muted">Kết quả đo lại trên 50 ảnh: short — số mệnh đề p90 15→11, max 16→15;
+    medium — p90 29→25, max 44→33. Đây là cải thiện ở checklist (đầu vào bước 2a); độ dài
+    prompt thực tế cần đo lại sau khi chạy lại bước 2a.</span>
+  </div>
 
   <div class="ex-lbl">Ví dụ — cùng một ảnh, hai mức nén</div>
 <pre>Ảnh gốc: chợ nổi Cái Răng — 7 element, trong đó có cả một
@@ -349,6 +376,28 @@ long     bề rộng: giữ 4/7 nhóm  (xô nhựa, sọt trái cây bị loại
     Ở mức short, checklist chỉ có "thuyền gỗ" — nên model tự thêm "quán ăn nổi, có người
     đội nón lá đang nấu" <strong>không bị trừ điểm</strong>, ngược lại còn được tính vào
     chỉ số Độ dày.
+  </div>
+
+  <div class="callout">
+    <div class="t">Ba lỗi lắp checklist đã sửa (phát hiện từ dữ liệu server thật)</div>
+    <strong>Thiếu thông tin cảnh (scene).</strong> <code>loại ảnh / góc chụp / ánh sáng / không
+    khí / bối cảnh</code> được đưa vào bước 2a để viết prompt nhưng ban đầu không được đưa vào
+    checklist — bước 2b lọc dựa trên checklist thiếu này nên cứ thấy prompt nhắc tới ánh sáng,
+    góc chụp... là báo "thêm tin" oan. Tỉ lệ đạt rơi từ ~60% xuống 4–8%. Sửa bằng cách luôn thêm
+    giá trị scene vào checklist.
+    <br><br>
+    <strong>Trùng chủ thể giữa các thành viên trong nhóm bị xoá nhầm.</strong> Khi hai thành viên
+    một nhóm có cùng danh từ chủ thể (hai "người phụ nữ", hai "bông tai vàng"), bước lắp checklist
+    từng khử trùng theo văn bản trên toàn nhóm — làm mất luôn danh từ chủ thể của thành viên thứ
+    hai, để lại một thuộc tính mồ côi không chủ thể. Model viết đúng (dùng <code>cardinality</code>
+    để suy ra "một cô khác") nhưng bị chấm sai vì checklist thiếu. Sửa: bỏ khử trùng liên-thành-viên,
+    mỗi thành viên giữ đủ mệnh đề của riêng nó.
+    <br><br>
+    <strong>Tên nhóm văn hoá bị rơi khỏi checklist khi nhóm đã có sẵn mệnh đề khác.</strong> Tên
+    riêng của nhóm văn hoá (vd "thanh đồng trong lễ Hầu đồng") trước đây chỉ được thêm vào checklist
+    khi nhóm đó <em>không có mệnh đề nào khác</em> — nếu nhóm đã có 8 mệnh đề từ các element con thì
+    tên nhóm không bao giờ vào checklist, dù model viết đúng tên vẫn bị báo "thêm tin". Sửa: nhóm
+    văn hoá luôn có tên trong checklist, bất kể đã có mệnh đề khác hay chưa.
   </div>
 </div>
 
@@ -401,7 +450,7 @@ CẤM
 - Cấm văn dịch. Viết như người Việt nói chuyện.
 - Cấm lặp một khuôn mở đầu; đa dạng cách vào câu.
 
-PERSONA: {vai} · {giọng} · {ngôn ngữ} · {độ cẩu thả}</pre>
+PERSONA: {vai} · {giọng} · {ngôn ngữ}</pre>
 
   <p>Kèm <strong>3–5 ví dụ few-shot viết tay</strong>. Với nhiệm vụ bắt chước văn phong,
   few-shot hiệu quả hơn hẳn mô tả bằng luật.</p>
@@ -476,6 +525,30 @@ long    "Mình muốn ảnh chụp từ trên cao cảnh chợ nổi Cái Răng.
   <p>Kiểm tra prompt không <em>thêm</em> và không <em>thiếu</em> so với <code>sub_json</code>.
   Dự kiến loại 15–20%. Bỏ bước này thì <code>sub_json</code> hết là thước đo đáng tin,
   và toàn bộ phần đánh giá sập theo.</p>
+
+  <p><strong>Chỉ chấm hai điều: THIẾU và THÊM.</strong> Ban đầu có thêm tiêu chí "văn máy móc/
+  dịch máy" nhưng đã <strong>bỏ hẳn</strong> — không phải việc của bước lọc này, để dành cho một
+  mô-đun correction riêng nếu cần sau này.</p>
+
+  <div class="callout">
+    <div class="t">Ngôn ngữ không quan trọng, trừ một ngoại lệ</div>
+    Giám khảo (bước 2b) <strong>không được</strong> báo thiếu/thêm chỉ vì prompt diễn đạt bằng
+    ngôn ngữ khác với mệnh đề gốc — mệnh đề ghi "bright overcast daylight", prompt viết "ánh sáng
+    ban ngày dịu, trời âm u" thì vẫn tính là đã nhắc tới.
+    <br><br>
+    <strong>Ngoại lệ duy nhất: thuật ngữ văn hoá Việt Nam</strong> (áo dài, khăn xếp, chợ nổi Cái
+    Răng, thanh đồng, lễ Hầu đồng...) — những tên này <strong>bắt buộc giữ nguyên tiếng Việt</strong>.
+    Dịch "áo dài" thành "Vietnamese dress" hay "thanh đồng" thành "shaman" vẫn bị tính là thiếu.
+  </div>
+
+  <div class="callout">
+    <div class="t">Mệnh đề vị trí: không cần lặp tên chủ thể, nhưng giá trị vị trí phải đúng</div>
+    Một số mệnh đề vị trí lặp tên chủ thể/nhóm ở cuối câu (vd "ở tai phải thanh đồng"). Prompt viết
+    tự nhiên thường không lặp lại tên đó cho từng chi tiết — <strong>chỉ thiếu tên chủ thể lặp lại
+    thì không tính là thiếu</strong>. Nhưng phần vị trí cụ thể (trái/phải, tay/tai/cổ...) vẫn phải
+    khớp đúng: "...bông tai vàng bên tai phải" → đạt; "...bên tai trái" → sai vị trí, vẫn tính thiếu;
+    không nhắc bên nào cả → thiếu.
+  </div>
 </div>
 
 <!-- ---------- STEP 2c ---------- -->
