@@ -19,6 +19,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -26,6 +27,7 @@ from common import config, io_utils, llm, prompts, schema  # noqa: E402
 import step1b_build_subjson as s1b  # noqa: E402
 import step2a_verbalize as s2a  # noqa: E402
 import step2b_filter as s2b  # noqa: E402
+import step2b2_correct as s2b2  # noqa: E402
 import step1a_decompose as s1a  # noqa: E402
 
 
@@ -710,6 +712,44 @@ class _Args:
     max_missing = 0
 
 
+class TestCorrection(unittest.TestCase):
+    """STEP 2b2 -- sửa lại (retry 1 lần) prompt bị 2b loại, thay vì bỏ trắng."""
+
+    def test_step2b2_messages_carry_old_prompt_and_reasons(self):
+        messages = prompts.build_step2b2_messages(
+            ["áo dài", "màu đỏ"], ["màu đỏ"], ["cái nón"], "một người mặc áo dài",
+        )
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertEqual(messages[1]["role"], "user")
+        payload = json.loads(messages[1]["content"])
+        self.assertEqual(payload["prompt_cu"], "một người mặc áo dài")
+        self.assertEqual(payload["thieu"], ["màu đỏ"])
+        self.assertEqual(payload["thua"], ["cái nón"])
+        self.assertEqual(payload["checklist"], ["áo dài", "màu đỏ"])
+
+    def test_step2b2_system_only_asks_to_fix_stated_issues(self):
+        text = prompts.STEP2B2_SYSTEM
+        self.assertIn("CHỈ sửa đúng phần bị nêu lỗi", text)
+
+    def test_clean_strips_wrapping_quotes(self):
+        self.assertEqual(s2b2.step2b2_clean('"một câu đã sửa"'), "một câu đã sửa")
+
+    def test_clean_collapses_newlines(self):
+        self.assertEqual(s2b2.step2b2_clean("dòng một\ndòng hai"), "dòng một dòng hai")
+
+    def test_recovered_row_keeps_original_prompt_for_audit(self):
+        """corrected_passed phải giữ lại prompt gốc để audit -- không ghi đè mất dấu vết."""
+        row = {"id": "x", "detail_level": "short", "user_prompt": "cũ",
+              "checklist": [], "required_subject": None}
+        attempt_prompt = "mới đã sửa"
+        merged = {**row, "user_prompt": attempt_prompt,
+                 "n_words": len(attempt_prompt.split()), "corrected": True,
+                 "original_prompt": row["user_prompt"]}
+        self.assertEqual(merged["original_prompt"], "cũ")
+        self.assertEqual(merged["user_prompt"], "mới đã sửa")
+        self.assertTrue(merged["corrected"])
+
+
 class TestFilterDecision(unittest.TestCase):
 
     def test_clean_verdict_passes(self):
@@ -763,6 +803,21 @@ class TestFilterDecision(unittest.TestCase):
         verdict = {"missing": ["màu xanh"], "extra": []}
         out = s2b.decide(verdict, Tolerant(), required_subject=None)
         self.assertTrue(out["passed"])
+
+    def test_ignore_judge_verdict_shape_always_passes(self):
+        """--ignore_judge ghi verdict rỗng {"missing": [], "extra": [], "ignored": True}
+        cho MỌI dòng thay vì gọi model -- decide() phải luôn trả về đạt với verdict
+        này, kể cả khi có required_subject (không check gì cả theo đúng yêu cầu)."""
+        verdict = {"missing": [], "extra": [], "ignored": True}
+        out = s2b.decide(verdict, _Args(), required_subject="hủ tiếu Nam Vang")
+        self.assertTrue(out["passed"])
+
+    def test_ignore_judge_flag_exists_and_defaults_false(self):
+        with mock.patch.object(sys, "argv", ["step2b_filter.py", "--out_root", "x"]):
+            self.assertFalse(s2b.parse_args().ignore_judge)
+        with mock.patch.object(sys, "argv",
+                               ["step2b_filter.py", "--out_root", "x", "--ignore_judge"]):
+            self.assertTrue(s2b.parse_args().ignore_judge)
 
 
 # =============================================================================
@@ -1027,7 +1082,7 @@ class TestOutRoot(unittest.TestCase):
         names = list(io_utils.STEP_DIRS.values())
         self.assertEqual(len(names), len(set(names)), "tên thư mục step bị trùng")
         self.assertEqual(set(io_utils.STEP_DIRS),
-                         {"step0", "step1a", "step1b", "step2a", "step2b", "step2c"})
+                         {"step0", "step1a", "step1b", "step2a", "step2b", "step2b2", "step2c"})
 
     def test_step_dir_nests_under_out_root(self):
         self.assertEqual(str(io_utils.step_dir("test_1", "step0")), "test_1/step0_normalized")

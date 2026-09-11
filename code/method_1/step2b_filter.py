@@ -44,6 +44,10 @@ def parse_args() -> argparse.Namespace:
                    help="Số mệnh đề được phép thiếu (mặc định 0)")
     p.add_argument("--overwrite", action="store_true")
     p.add_argument("--dry_run", action="store_true")
+    p.add_argument("--ignore_judge", action="store_true",
+                   help="KHÔNG gọi judge, coi MỌI prompt là đạt (không chấm gì cả). "
+                        "Dùng khi muốn tắt hẳn cổng lọc 2b -- vd debug, hoặc tin tưởng "
+                        "thẳng đầu ra của 2a. Không tốn lượt gọi model nào.")
     return io_utils.add_common_args(p).parse_args()
 
 
@@ -114,6 +118,13 @@ def main() -> None:
         print("\n--- user ---\n{}".format(messages[-1]["content"][:800]))
         return
 
+    if args.ignore_judge:
+        print("[ignore_judge] BỎ QUA judge -- mọi prompt được coi là đạt, không chấm gì cả.\n")
+        for row in rows:
+            path = cache_dir / "{}.json".format(key_of(row))
+            if args.overwrite or not path.is_file():
+                io_utils.write_json(path, {"missing": [], "extra": [], "ignored": True})
+
     todo = []
     n_cached = 0
     for row in rows:
@@ -126,7 +137,7 @@ def main() -> None:
 
     failures: List[Dict[str, Any]] = []
 
-    if todo:
+    if todo and not args.ignore_judge:
         client = make_client()
         print("endpoint : {}".format(client.endpoint))
         print("model    : {}\n".format(client.model))

@@ -43,6 +43,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--val_ratio", type=float, default=None,
                    help="Dùng tỉ lệ thay cho số tuyệt đối (ghi đè --val_ids)")
     p.add_argument("--test_ratio", type=float, default=None)
+    p.add_argument("--include_corrected", dest="include_corrected",
+                   action="store_true", default=True,
+                   help="Gộp thêm <out_root>/step2b2_corrected/corrected_passed.jsonl "
+                        "nếu tồn tại (mặc định BẬT -- tự bỏ qua nếu step2b2 chưa chạy)")
+    p.add_argument("--no_include_corrected", dest="include_corrected", action="store_false")
     return io_utils.add_common_args(p).parse_args()
 
 
@@ -55,6 +60,20 @@ def main() -> None:
     subjson_file = io_utils.resolve(args.subjson_file, args.out_root, "step1b", "subjson.jsonl")
 
     rows = io_utils.read_jsonl(in_file)
+
+    # Nếu bước 2b2 (sửa lại prompt bị loại, --retry_rejected) đã chạy thì gộp thêm
+    # những dòng "cứu" được -- tự phát hiện qua sự có mặt của file, không cần cờ
+    # riêng ở run_all.sh cho bước này (giữ flexible: bật/tắt 2b2 không đòi phải sửa
+    # thêm ở 2c).
+    if args.include_corrected:
+        corrected_file = io_utils.resolve(None, args.out_root, "step2b2", "corrected_passed.jsonl")
+        if corrected_file.is_file():
+            corrected_rows = io_utils.read_jsonl(corrected_file)
+            if corrected_rows:
+                print("Gộp thêm {} dòng đã sửa (đạt sau retry) từ step2b2".format(
+                    len(corrected_rows)))
+            rows = rows + corrected_rows
+
     targets = {r["id"]: r["target_json"] for r in io_utils.read_jsonl(targets_file)}
     subjsons = {
         "{}__{}".format(r["id"], r["detail_level"]): r

@@ -18,6 +18,7 @@ STEP_DIRS = {
     "step1b": "step1b_subjson",
     "step2a": "step2a_prompts",
     "step2b": "step2b_filtered",
+    "step2b2": "step2b2_corrected",
     "step2c": "step2c_split",
 }
 

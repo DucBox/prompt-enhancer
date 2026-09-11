@@ -308,3 +308,42 @@ def build_step2b_messages(facts: List[str], prompt_text: str) -> List[Dict[str, 
         {"role": "system", "content": STEP2B_SYSTEM},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)},
     ]
+
+
+# =============================================================================
+# STEP 2b2 — sửa lại prompt bị 2b loại (retry 1 lần), thay vì bỏ trắng
+# =============================================================================
+
+STEP2B2_SYSTEM = r"""Bạn nhận một CÂU PROMPT đã bị một bộ kiểm duyệt từ chối, kèm đúng lý do bị từ chối.
+Nhiệm vụ: viết lại câu prompt để SỬA ĐÚNG những lỗi đã nêu, giữ nguyên mọi phần còn lại
+(văn phong, độ dài, thứ tự, ngôn ngữ) không cần thiết phải đổi.
+
+Bạn được cho:
+  - "prompt_cu": câu prompt gốc.
+  - "thieu": các mệnh đề bị đánh giá là THIẾU — phải bổ sung chúng vào (diễn đạt tự
+    nhiên, không cần chép nguyên văn).
+  - "thua": nội dung bị đánh giá là THÊM không có căn cứ — phải bỏ đúng phần đó ra.
+  - "checklist": toàn bộ mệnh đề được phép nói, để không vô tình bịa thêm khi sửa.
+
+Quy tắc:
+- CHỈ sửa đúng phần bị nêu lỗi. Không viết lại toàn bộ câu nếu không cần thiết.
+- Không được thêm nội dung nào ngoài "checklist".
+- Giữ nguyên độ dài tương đối, văn phong, ngôn ngữ của câu gốc.
+- Giữ NGUYÊN VĂN thuật ngữ tiếng Việt.
+- Chỉ trả về đúng câu prompt đã sửa, không thêm lời dẫn, không giải thích, không đặt
+  trong ngoặc kép."""
+
+
+def build_step2b2_messages(
+    checklist: List[str], missing: List[str], extra: List[str], old_prompt: str,
+) -> List[Dict[str, str]]:
+    payload = {
+        "prompt_cu": old_prompt,
+        "thieu": missing,
+        "thua": extra,
+        "checklist": checklist,
+    }
+    return [
+        {"role": "system", "content": STEP2B2_SYSTEM},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)},
+    ]

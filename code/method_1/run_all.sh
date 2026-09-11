@@ -11,7 +11,12 @@
 #   --test              Chạy thử trên một ít mẫu ngẫu nhiên
 #   --test_samples N    Số mẫu khi bật --test                           (mặc định: 20)
 #   --workers N         Số luồng gọi model song song                    (mặc định: 4)
-#   --from STEP         Bắt đầu từ step này: 0|1a|1b|2a|2b|2c           (mặc định: 0)
+#   --from STEP         Bắt đầu từ step này: 0|1a|1b|2a|2b|2b2|2c       (mặc định: 0)
+#   --retry_rejected    Bật step 2b2: sửa lại (retry ĐÚNG 1 lần) prompt bị 2b loại
+#                        thay vì bỏ trắng. Mặc định TẮT -- không bật thì rejected.jsonl
+#                        của 2b vẫn là danh sách cuối cùng bị loại, y như trước.
+#   --ignore_judge       Tắt hẳn cổng lọc 2b: KHÔNG gọi judge, coi mọi prompt là đạt,
+#                        không chấm gì cả. Dùng khi debug hoặc tin thẳng đầu ra của 2a.
 #
 # Ghi chú về --test: cờ này CHỈ đặt ở step 0. Step 0 lọc dữ liệu còn N mẫu,
 # các step sau tự kế thừa N mẫu đó. Nếu đặt --test ở mọi step thì mỗi step lại
@@ -26,16 +31,20 @@ TEST=0
 TEST_SAMPLES=20
 WORKERS=4
 FROM="0"
+RETRY_REJECTED=0
+IGNORE_JUDGE=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --in_dir)        IN_DIR="$2"; shift 2 ;;
-    --out_dir)       OUT_DIR="$2"; shift 2 ;;
-    --test)          TEST=1; shift ;;
-    --test_samples)  TEST_SAMPLES="$2"; shift 2 ;;
-    --workers)       WORKERS="$2"; shift 2 ;;
-    --from)          FROM="$2"; shift 2 ;;
-    -h|--help)       sed -n '2,26p' "$0"; exit 0 ;;
+    --in_dir)          IN_DIR="$2"; shift 2 ;;
+    --out_dir)         OUT_DIR="$2"; shift 2 ;;
+    --test)            TEST=1; shift ;;
+    --test_samples)    TEST_SAMPLES="$2"; shift 2 ;;
+    --workers)         WORKERS="$2"; shift 2 ;;
+    --from)            FROM="$2"; shift 2 ;;
+    --retry_rejected)  RETRY_REJECTED=1; shift ;;
+    --ignore_judge)    IGNORE_JUDGE=1; shift ;;
+    -h|--help)         sed -n '2,23p' "$0"; exit 0 ;;
     *) echo "Tham số lạ: $1  (dùng --help)" >&2; exit 1 ;;
   esac
 done
@@ -53,7 +62,7 @@ fi
 
 ROOT=(--out_root "$OUT_DIR")
 
-STEP_ORDER=(0 1a 1b 2a 2b 2c)
+STEP_ORDER=(0 1a 1b 2a 2b 2b2 2c)
 
 step_index() {   # step_index <step> -> vị trí trong STEP_ORDER, hoặc -1
   local i
@@ -83,6 +92,8 @@ if [[ $TEST -eq 1 ]]; then
 else
   echo "chế độ   : FULL — toàn bộ dữ liệu"
 fi
+echo "retry 2b2: $([[ $RETRY_REJECTED -eq 1 ]] && echo BẬT || echo tắt)"
+echo "judge 2b : $([[ $IGNORE_JUDGE -eq 1 ]] && echo "BỎ QUA (ignore_judge)" || echo "bật (chấm bình thường)")"
 
 START=$(date +%s)
 
@@ -98,8 +109,17 @@ if should_run 1b; then banner "STEP 1b  nén 2 trục"
 if should_run 2a; then banner "STEP 2a  sinh user prompt  [gọi model]"
   python3 step2a_verbalize.py "${ROOT[@]}" --workers "$WORKERS"; fi
 
+IGNORE_JUDGE_ARGS=()
+if [[ $IGNORE_JUDGE -eq 1 ]]; then IGNORE_JUDGE_ARGS=(--ignore_judge); fi
+
 if should_run 2b; then banner "STEP 2b  lọc chất lượng  [gọi model]"
-  python3 step2b_filter.py "${ROOT[@]}" --workers "$WORKERS"; fi
+  python3 step2b_filter.py "${ROOT[@]}" --workers "$WORKERS" \
+    "${IGNORE_JUDGE_ARGS[@]+"${IGNORE_JUDGE_ARGS[@]}"}"; fi
+
+if should_run 2b2 && [[ $RETRY_REJECTED -eq 1 ]]; then
+  banner "STEP 2b2  sửa lại prompt bị loại (retry 1 lần)  [gọi model]"
+  python3 step2b2_correct.py "${ROOT[@]}" --workers "$WORKERS"
+fi
 
 if should_run 2c; then banner "STEP 2c  chia tập"
   python3 step2c_split.py "${ROOT[@]}"; fi

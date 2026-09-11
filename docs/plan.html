@@ -697,12 +697,12 @@ long    "Mình muốn ảnh chụp từ trên cao cảnh chợ nổi Cái Răng.
   </div>
 </div>
 
-<!-- ---------- STEP 2b2 (đề xuất) ---------- -->
+<!-- ---------- STEP 2b2 ---------- -->
 <div class="step">
   <div class="step-head">
     <span class="num">2b2</span>
-    <span class="step-title">Sửa lại prompt bị loại <span class="muted" style="font-weight:400">(đề xuất — chưa triển khai)</span></span>
-    <span class="step-note">LLM</span>
+    <span class="step-title">Sửa lại prompt bị loại</span>
+    <span class="step-note">LLM · tuỳ chọn — <code>--retry_rejected</code></span>
   </div>
   <div class="io">
     <div class="in"><div class="lbl">Đầu vào</div>
@@ -710,12 +710,26 @@ long    "Mình muốn ảnh chụp từ trên cao cảnh chợ nổi Cái Răng.
     <div class="out"><div class="lbl">Đầu ra</div>
       <ul><li>Cặp đạt (đã sửa) · Cặp thật sự bị loại</li></ul></div>
   </div>
-  <p>Hiện tại prompt bị 2b loại là <strong>mất trắng</strong>, dù phần lớn lỗi (thiếu 1-2 mệnh đề,
-  thừa 1 chi tiết) hoàn toàn sửa được thay vì phải sinh lại từ đầu. Đề xuất: đưa đúng lý do bị
-  loại (thiếu gì, thừa gì) cho một lượt gọi LLM sửa lại, rồi chấm lại bằng đúng judge của 2b —
-  đạt thì gộp vào tập đạt (đánh dấu <code>corrected: true</code> để biết nguồn gốc), vẫn fail thì
-  mới thật sự loại.</p>
-  <p class="muted">Chưa chốt: số lần retry tối đa trước khi bỏ cuộc. Chưa triển khai code.</p>
+  <p>Mặc định prompt bị 2b loại là <strong>mất trắng</strong>, dù phần lớn lỗi (thiếu 1-2 mệnh đề,
+  thừa 1 chi tiết) hoàn toàn sửa được thay vì phải sinh lại từ đầu. Bật <code>--retry_rejected</code>
+  (mặc định tắt) thì sau bước 2b, <code>step2b2_correct.py</code> đưa đúng lý do bị loại (thiếu gì,
+  thừa gì) cho một lượt gọi LLM sửa lại — CHỈ sửa đúng phần bị nêu lỗi, không viết lại từ đầu — rồi
+  chấm lại bằng đúng judge của 2b (kể cả ràng buộc <code>required_subject</code> ở bước trước). Đạt
+  thì gộp vào tập đạt (đánh dấu <code>corrected: true</code>, giữ <code>original_prompt</code> để
+  audit); vẫn fail thì mới thật sự loại.</p>
+  <div class="callout">
+    <div class="t">Retry ĐÚNG 1 lần, không lặp thêm</div>
+    Chỉ sửa một lần duy nhất rồi chấm lại — đủ cho lỗi nhỏ (thiếu/thừa 1-2 mệnh đề), chi phí thêm
+    đúng 1 lượt gọi model cho mỗi prompt bị loại, không có rủi ro lặp vô hạn.
+    <code>step2c_split.py</code> tự phát hiện và gộp <code>corrected_passed.jsonl</code> nếu bước
+    này đã chạy, không cần cấu hình gì thêm ở 2c.
+  </div>
+  <div class="callout">
+    <div class="t">Cờ liên quan: tắt hẳn cổng lọc (<code>--ignore_judge</code>)</div>
+    Thêm cờ ở bước 2b: khi bật, KHÔNG gọi judge, mọi prompt được coi là đạt — không chấm gì cả.
+    Dùng khi debug hoặc muốn tin thẳng đầu ra của 2a. Cả hai cờ (<code>--retry_rejected</code>,
+    <code>--ignore_judge</code>) đều tắt theo mặc định, không đổi hành vi cũ nếu không bật.
+  </div>
 </div>
 
 <!-- ---------- STEP 2c ---------- -->

@@ -25,6 +25,7 @@ Endpoint không bao giờ xuất hiện trong source — có test tự động c
 | 1b | `step1b_build_subjson.py`  | –   | `step1b_subjson/` |
 | 2a | `step2a_verbalize.py`      | ✅  | `step2a_prompts/` |
 | 2b | `step2b_filter.py`         | ✅  | `step2b_filtered/` |
+| 2b2 | `step2b2_correct.py` (tuỳ chọn, `--retry_rejected`) | ✅  | `step2b2_corrected/` |
 | 2c | `step2c_split.py`          | –   | `step2c_split/` |
 
 Mỗi step ghi vào một thư mục con riêng, và tự tìm đầu ra của step trước trong cùng
@@ -52,6 +53,7 @@ test_1/
 ├── step1b_subjson/       subjson.jsonl, stats.json
 ├── step2a_prompts/       prompts.jsonl, prompts/<id>__<level>.json
 ├── step2b_filtered/      passed.jsonl, rejected.jsonl, report.json
+├── step2b2_corrected/    corrected_passed.jsonl, rejected_final.jsonl (chỉ có nếu --retry_rejected)
 └── step2c_split/         train.jsonl, val.jsonl, test.jsonl
 ```
 
@@ -62,7 +64,9 @@ test_1/
 | `--test` | tắt | chạy thử trên ít mẫu |
 | `--test_samples N` | 20 | |
 | `--workers N` | 4 | số luồng gọi model |
-| `--from STEP` | `0` | bắt đầu từ `0\|1a\|1b\|2a\|2b\|2c` |
+| `--from STEP` | `0` | bắt đầu từ `0\|1a\|1b\|2a\|2b\|2b2\|2c` |
+| `--retry_rejected` | tắt | bật step 2b2: sửa lại (retry ĐÚNG 1 lần) prompt bị 2b loại |
+| `--ignore_judge` | tắt | tắt hẳn cổng 2b — không gọi judge, coi mọi prompt là đạt |
 
 **`--test` chỉ được đặt ở step 0.** Step 0 lọc dữ liệu còn N mẫu, các step sau tự kế
 thừa N mẫu đó. Nếu đặt `--test` ở mọi step thì mỗi step lại bốc ngẫu nhiên tiếp và
@@ -89,11 +93,20 @@ mạng — dùng để soi prompt trước khi đốt tiền.
   ở step 1b là code thuần có seed. Nghĩa là tái tạo lại y hệt dataset mà không cần gọi lại model.
 - **Model chấm lọc riêng.** Step 2b ưu tiên `JUDGE_BASE_URL` / `JUDGE_MODEL` nếu `.env`
   có khai báo — nên dùng model khác họ với model sinh để tránh thiên vị.
+- **Sửa lại prompt bị loại (`--retry_rejected`).** Mặc định TẮT. Bật lên thì sau step 2b,
+  `step2b2_correct.py` đưa đúng lý do bị loại (thiếu/thừa) cho model sửa lại — CHỈ sửa
+  đúng phần bị nêu lỗi, không viết lại từ đầu — rồi chấm lại bằng đúng judge của 2b
+  (kể cả ràng buộc `required_subject`). Đạt thì gộp vào tập đạt (`corrected: true`,
+  giữ `original_prompt` để audit); vẫn fail thì mới thật sự loại — **retry đúng 1 lần**,
+  không lặp thêm. `step2c_split.py` tự phát hiện và gộp `corrected_passed.jsonl` nếu có,
+  không cần cấu hình gì thêm.
+- **Tắt hẳn cổng lọc (`--ignore_judge`).** Không gọi judge, mọi prompt được coi là đạt
+  — không chấm gì cả. Dùng khi debug hoặc muốn tin thẳng đầu ra của 2a.
 
 ## Test
 
 ```bash
-python3 tests/test_pipeline.py       # 73 test, không chạm mạng
+python3 tests/test_pipeline.py       # 109 test, không chạm mạng
 ```
 
 Logic thuần được test đầy đủ hành vi. Phần gọi model chỉ test được những gì test
