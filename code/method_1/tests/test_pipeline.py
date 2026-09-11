@@ -717,6 +717,33 @@ class TestPrompts(unittest.TestCase):
         for banned in ["liệt kê", "góc trên bên trái", "văn dịch", "thứ tự"]:
             self.assertIn(banned, text)
 
+    def test_step2a_system_requires_full_coverage_of_given_facts(self):
+        """Chốt chặn cho lỗ hổng thật: STEP2A_SYSTEM chỉ cấm THÊM tin, chưa từng nói
+        rõ phải nhắc ĐỦ mọi mệnh đề được cho -- model có thể tự ý bỏ bớt ánh sáng/
+        bối cảnh mà không phạm luật nào, khớp với hiện tượng anh_sang/boi_canh vẫn
+        thiếu ngay cả ở mức long (dư từ, không phải do hết ngân sách)."""
+        text = prompts.STEP2A_SYSTEM
+        self.assertIn("ĐẦY ĐỦ", text)
+        self.assertIn("bỏ sót", text)
+
+    def test_step2a_fewshot_examples_fully_cover_their_own_scene(self):
+        """Few-shot phải LÀM MẪU đúng luật 'nhắc đủ mọi mệnh đề, kể cả scene' --
+        nếu ví dụ tự mâu thuẫn với luật thì model học sai theo ví dụ, bất kể luật
+        viết gì trong system prompt."""
+        stopwords = {"từ", "trên", "trong", "chụp", "và", "mặt"}
+        for spec, answer in prompts.STEP2A_FEWSHOT:
+            scene = spec.get("scene", "")
+            if not scene:
+                continue
+            answer_low = answer.lower()
+            for bit in scene.split(","):
+                bit = bit.strip().lower()
+                keywords = [w for w in bit.split() if w not in stopwords]
+                for kw in keywords:
+                    self.assertIn(kw, answer_low,
+                                 "few-shot {}: output không nhắc '{}' (từ scene "
+                                 "'{}')".format(spec["detail_level"], kw, bit))
+
     def test_step2a_fewshot_lengths_match_their_level(self):
         bounds = {"short": (5, 25), "medium": (25, 70), "long": (55, 220)}
         for spec, answer in prompts.STEP2A_FEWSHOT:

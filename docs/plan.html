@@ -433,6 +433,22 @@ số lượng                         8          8</pre>
     nào đáng sửa thêm ở đây.</span>
   </div>
 
+  <div class="callout">
+    <div class="t">Toàn bộ fix ở trên đều sửa checklist (1b) — chưa sửa lời dặn cho model (2a)</div>
+    Mọi fix từ đầu tới giờ đều nằm ở <strong>bước 1b</strong> (thay đổi checklist — cái gì
+    được coi là "đúng"), chưa đụng tới <strong>STEP2A_SYSTEM</strong> (lời dặn thật sự đưa
+    cho model viết prompt). Soi lại thấy một lỗ hổng thật ở đó:
+    <code>anh_sang</code>/<code>boi_canh</code> vẫn bị thiếu thường xuyên ngay cả ở mức
+    <em>long</em> (dư từ, không phải do hết ngân sách) — vì system prompt chỉ
+    <strong>cấm THÊM</strong> tin ngoài bản mô tả, chưa từng nói rõ phải <strong>nhắc đủ</strong>
+    mọi mệnh đề được cho. Model có thể tự ý bỏ bớt ánh sáng/bối cảnh mà không phạm luật nào.
+    <br><br>
+    Sửa: thêm một dòng bắt buộc — "phải nhắc đến đầy đủ mọi mệnh đề được cho, kể cả scene;
+    được diễn đạt lại tự nhiên hơn nhưng không được bỏ sót". Bốn ví dụ few-shot đã sẵn làm
+    đúng việc này (đều nhắc đủ phần scene của chính nó) nên không cần sửa, chỉ cần nói rõ
+    thành luật tường minh để model khái quát đúng cho những trường hợp ngoài few-shot.
+  </div>
+
   <div class="ex-lbl">Ví dụ — cùng một ảnh, hai mức nén</div>
 <pre>Ảnh gốc: chợ nổi Cái Răng — 7 element, trong đó có cả một
          element 17 từ tả "cái xô nhựa đỏ trên boong thuyền"

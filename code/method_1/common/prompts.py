@@ -144,6 +144,10 @@ BẮT BUỘC
 - Viết như người ĐANG ĐẶT HÀNG một bức ảnh chưa tồn tại,
   KHÔNG phải người đang mô tả một bức ảnh có sẵn trước mặt.
 - Chỉ nói những gì có trong bản mô tả. Cấm thêm bất kỳ thông tin mới nào.
+- PHẢI nhắc đến ĐẦY ĐỦ mọi mệnh đề được cho — kể cả phần "scene" (ánh sáng, góc
+  chụp, không khí, bối cảnh) nếu có. Được phép diễn đạt lại tự nhiên hơn, gộp
+  chung với ý khác, KHÔNG được tự ý bỏ sót bất kỳ mệnh đề nào chỉ vì thấy không
+  quan trọng — thiếu một mệnh đề cũng bị coi là lỗi giống hệt như thêm bịa.
 - Giữ NGUYÊN VĂN thuật ngữ tiếng Việt (áo dài, khăn xếp, bánh tét, chợ nổi Cái Răng, nón lá...).
 - Nếu bản mô tả ghi số lượng chính xác thì phải nói đúng số đó.
   Nếu ghi mơ hồ ("nhiều", "mấy") thì cũng nói mơ hồ, KHÔNG được tự chế ra con số.
