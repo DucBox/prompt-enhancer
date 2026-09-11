@@ -7,11 +7,18 @@ Supports:
   * 1 GPU: Unsloth FastModel QLoRA (recommended OSS path)
   * multi GPU: Transformers + PEFT QLoRA under torchrun/DDP
 
-Expected JSONL (field names are configurable):
-  {"user_prompt":"...", "cot":"...", "target_json": {...}}
+Expected JSONL (field names are configurable; matches code/method_1/step2c_split.py output):
+  {"user_prompt":"...", "mode":"short|medium|long", "cot":"...", "target_json": {...}}
 
 The target should already be your normalized Prompt-Enhancer target (for this project:
 Ideogram-4-like JSON without bbox/color_palette fields).
+
+"mode" (short/medium/long) selects WHICH SYSTEM PROMPT is used for that row -- see
+prompts.py. Each level has its own distinct system prompt (not a shared prompt with
+a one-line tag), because the model's job genuinely differs per level: short needs to
+invent detail, long needs to faithfully structure what's already given. The same
+per-level selection must happen at inference time; there is no way to train this
+without the caller knowing which level it is serving.
 """
 
 from __future__ import annotations
@@ -21,6 +28,7 @@ import json
 import math
 import os
 import random
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -29,36 +37,8 @@ import torch
 from datasets import Dataset, load_dataset
 from transformers import Trainer, TrainingArguments, set_seed
 
-
-DEFAULT_SYSTEM_PROMPT = r"""You are a prompt enhancer for a Vietnamese-culture-tuned Ideogram 4 image generator.
-Transform the user's request into one faithful, detailed, structured image caption.
-
-Requirements:
-- Preserve every explicit user constraint: subjects, counts, colors, actions, negation, text, spatial relationships, style, and Vietnamese cultural concepts.
-- Do not mistranslate, replace, or genericize a Vietnamese cultural concept when its Vietnamese name is known or supplied by the user.
-- Add useful visual detail only when it is compatible with the user's intent; do not introduce contradictions.
-- Output exactly one JSON object and no commentary after the final answer.
-- Preserve non-ASCII characters literally; do not escape Vietnamese text with \\uXXXX.
-- Do not output bbox or color_palette fields.
-
-Target schema:
-{
-  "high_level_description": "...",
-  "style_description": {
-    "aesthetics": "...",
-    "lighting": "...",
-    "photo": "...", OR "art_style": "...",
-    "medium": "..."
-  },
-  "compositional_deconstruction": {
-    "background": "...",
-    "elements": [
-      {"type": "obj", "desc": "..."},
-      {"type": "text", "text": "verbatim text", "desc": "..."}
-    ]
-  }
-}
-Use photo OR art_style, not both. Keep key ordering stable and return minified JSON for the final answer."""
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from prompts import LEVELS, build_system_prompt  # noqa: E402
 
 
 # Qwen3.6 hybrid language stack: standard attention + GatedDeltaNet + MLP.
@@ -86,7 +66,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--prompt_field", default="user_prompt")
     p.add_argument("--cot_field", default="cot")
     p.add_argument("--target_field", default="target_json")
-    p.add_argument("--system_prompt_file", default=None)
+    p.add_argument("--detail_level_field", default="mode",
+                   help="Trường trong JSONL ghi short/medium/long (khớp field 'mode' "
+                        "do step2c_split.py sinh ra). Mỗi mức dùng MỘT system prompt "
+                        "riêng (xem prompts.py) -- không phải một tag chung.")
+    p.add_argument("--system_prompt_file", default=None,
+                   help="Nâng cao/debug: ép DÙNG CHUNG một system prompt cho MỌI dòng, "
+                        "bỏ qua lựa chọn theo detail_level_field. Mặc định (để trống) "
+                        "sẽ tự chọn system prompt đúng theo mức của từng dòng.")
 
     p.add_argument("--max_seq_length", type=int, default=4096)
     p.add_argument("--lora_r", type=int, default=32)
@@ -127,10 +114,27 @@ def distributed_info() -> tuple[int, int, int]:
     return world_size, local_rank, rank
 
 
-def load_system_prompt(path: Optional[str]) -> str:
+def load_system_prompt_override(path: Optional[str]) -> Optional[str]:
+    """None nghĩa là KHÔNG override -- mỗi dòng sẽ tự chọn system prompt theo mức
+    (xem resolve_system_prompt). Chỉ trả về non-None khi người dùng chủ động ép
+    dùng chung một prompt qua --system_prompt_file (trường hợp debug/nâng cao)."""
     if not path:
-        return DEFAULT_SYSTEM_PROMPT
+        return None
     return Path(path).read_text(encoding="utf-8").strip()
+
+
+def resolve_system_prompt(ex: Dict[str, Any], args: argparse.Namespace,
+                          override: Optional[str]) -> str:
+    if override is not None:
+        return override
+    level = str(ex.get(args.detail_level_field, "")).strip().lower()
+    if level not in LEVELS:
+        raise ValueError(
+            "thiếu/sai trường '{}' (giá trị: {!r}) -- cần một trong {}; hoặc dùng "
+            "--system_prompt_file để ép dùng chung một prompt".format(
+                args.detail_level_field, level, LEVELS)
+        )
+    return build_system_prompt(level)
 
 
 def contains_forbidden_training_fields(obj: Any) -> bool:
@@ -209,7 +213,8 @@ def _as_ids(x: Any) -> List[int]:
     return list(x)
 
 
-def encode_record(ex: Dict[str, Any], tokenizer, system_prompt: str, args: argparse.Namespace) -> Dict[str, Any]:
+def encode_record(ex: Dict[str, Any], tokenizer, args: argparse.Namespace,
+                  system_prompt_override: Optional[str]) -> Dict[str, Any]:
     user_prompt = str(ex.get(args.prompt_field, "")).strip()
     if not user_prompt:
         raise ValueError(f"empty {args.prompt_field}")
@@ -217,6 +222,8 @@ def encode_record(ex: Dict[str, Any], tokenizer, system_prompt: str, args: argpa
     cot = str(ex.get(args.cot_field, "") or "").strip()
     if args.mode == "cot" and not cot:
         raise ValueError(f"CoT mode requires non-empty field '{args.cot_field}'")
+
+    system_prompt = resolve_system_prompt(ex, args, system_prompt_override)
 
     target_json = target_to_minified_json(
         ex.get(args.target_field),
@@ -264,7 +271,8 @@ def encode_record(ex: Dict[str, Any], tokenizer, system_prompt: str, args: argpa
     }
 
 
-def prepare_dataset(path: str, tokenizer, system_prompt: str, args: argparse.Namespace) -> Dataset:
+def prepare_dataset(path: str, tokenizer, args: argparse.Namespace,
+                    system_prompt_override: Optional[str]) -> Dataset:
     raw = load_dataset("json", data_files=path, split="train")
     rows: List[Dict[str, Any]] = []
     errors = 0
@@ -272,7 +280,7 @@ def prepare_dataset(path: str, tokenizer, system_prompt: str, args: argparse.Nam
 
     for i, ex in enumerate(raw):
         try:
-            item = encode_record(ex, tokenizer, system_prompt, args)
+            item = encode_record(ex, tokenizer, args, system_prompt_override)
         except Exception as e:
             errors += 1
             if errors <= 10:
@@ -433,7 +441,7 @@ def main() -> None:
     set_seed(args.seed)
     random.seed(args.seed)
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-    system_prompt = load_system_prompt(args.system_prompt_file)
+    system_prompt_override = load_system_prompt_override(args.system_prompt_file)
 
     if args.backend == "unsloth":
         model, processor = load_unsloth_model(args)
@@ -442,8 +450,9 @@ def main() -> None:
 
     tokenizer = get_text_tokenizer(processor)
 
-    train_ds = prepare_dataset(args.train_file, tokenizer, system_prompt, args)
-    eval_ds = prepare_dataset(args.eval_file, tokenizer, system_prompt, args) if args.eval_file else None
+    train_ds = prepare_dataset(args.train_file, tokenizer, args, system_prompt_override)
+    eval_ds = (prepare_dataset(args.eval_file, tokenizer, args, system_prompt_override)
+              if args.eval_file else None)
 
     denom = args.per_device_batch_size * world_size
     grad_accum = max(1, math.ceil(args.global_batch_size / denom))
@@ -517,7 +526,18 @@ def main() -> None:
         Path(final_dir, "training_args.json").write_text(
             json.dumps(vars(args), ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        Path(final_dir, "system_prompt.txt").write_text(system_prompt, encoding="utf-8")
+        # Lưu ĐÚNG những system prompt đã dùng lúc train -- lúc infer, app phải chọn
+        # đúng file tương ứng với mức đang phục vụ (short/medium/long), không được
+        # tự bịa hay dùng lẫn, nếu không sẽ lệch train/infer.
+        if system_prompt_override is not None:
+            Path(final_dir, "system_prompt_override.txt").write_text(
+                system_prompt_override, encoding="utf-8"
+            )
+        else:
+            for level in LEVELS:
+                Path(final_dir, f"system_prompt_{level}.txt").write_text(
+                    build_system_prompt(level), encoding="utf-8"
+                )
         print(f"Saved adapter to: {final_dir}")
 
 
