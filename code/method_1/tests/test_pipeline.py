@@ -230,6 +230,17 @@ class TestBuildSubJson(unittest.TestCase):
         for fact in flat:
             self.assertIn(fact, sub["checklist"])
 
+    def test_checklist_includes_scene_values(self):
+        """Chốt chặn cho bug thật: 2a được cấp scene để viết prompt, nên checklist ở
+        2b PHẢI chứa scene — thiếu nó thì mọi câu tả ánh sáng/bối cảnh bị chấm oan
+        là 'thêm tin' dù model chỉ đang tả đúng phần được cấp."""
+        for level in ("short", "medium", "long"):
+            sub = self.build(level)
+            for value in sub["scene"].values():
+                if value:
+                    self.assertIn(value, sub["checklist"],
+                                 "{}: thiếu '{}' trong checklist".format(level, value))
+
     def test_first_clause_compression(self):
         self.assertEqual(
             s1b.first_clause("Quảng trường Ba Đình rộng; bầu trời trong xanh"),

@@ -255,6 +255,11 @@ def build_subjson(
     depth_drop = 1.0 - (n_facts_kept / n_facts_total) if n_facts_total else 0.0
     scene = build_scene(target, level)
 
+    # scene (góc chụp, ánh sáng, bối cảnh...) cũng là thông tin đưa cho model 2a viết prompt,
+    # nên PHẢI có mặt trong checklist — thiếu nó thì mọi câu nhắc tới ánh sáng/bối cảnh
+    # sẽ bị step 2b chấm oan là "thêm tin" dù thực ra 2a chỉ đang tả đúng phần được cấp.
+    checklist.extend(v for v in scene.values() if v)
+
     return {
         "id": row_id,
         "detail_level": level,
