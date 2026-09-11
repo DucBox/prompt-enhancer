@@ -201,6 +201,7 @@ def main() -> None:
             "user_prompt": item["user_prompt"],
             "n_words": item["n_words"],
             "checklist": sub["checklist"],
+            "required_subject": sub.get("required_subject"),
         })
 
     n_written = io_utils.write_jsonl(out_dir / "prompts.jsonl", merged)

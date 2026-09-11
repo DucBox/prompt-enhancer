@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import random
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -83,6 +84,38 @@ LEVEL_CONFIG = {
 }
 
 LEVELS = ("short", "medium", "long")
+
+
+# Tên file trong bộ dữ liệu này chính là slug không dấu của CHỦ THỂ CHÍNH thật sự
+# (vd "ruoc_kieu_002128" -> "rước kiệu", "hu_tieu_nam_vang_001001" -> "hủ tiếu Nam
+# Vang"). Đây là tín hiệu ĐỘC LẬP với việc step1a xếp nhóm nào là "group 0" -- nếu
+# step1a lỡ xếp sai (chủ thể chính không phải nhóm đứng đầu), tín hiệu này vẫn đúng.
+# Dùng nó để bắt buộc một mệnh đề PHẢI có mặt trong checklist, không phụ thuộc nhóm
+# đó có được coi là "main" hay không, và không bị --max_missing ở bước 2b nới lỏng.
+def strip_vn_diacritics(s: str) -> str:
+    s = s.replace("đ", "d").replace("Đ", "D")
+    nfd = unicodedata.normalize("NFD", s)
+    return "".join(c for c in nfd if unicodedata.category(c) != "Mn")
+
+
+def filename_keyword_words(row_id: str) -> List[str]:
+    """"ruoc_kieu_002128" -> ["ruoc", "kieu"] -- bỏ hậu tố số thứ tự cuối cùng."""
+    slug = re.sub(r"_\d+$", "", row_id)
+    return [w for w in slug.split("_") if w]
+
+
+def find_required_group_index(groups: List[Dict[str, Any]], row_id: str) -> Optional[int]:
+    """Tìm nhóm khái niệm có tên (bỏ dấu) khớp với slug filename. None nếu không
+    tìm thấy nhóm nào khớp rõ ràng (vd filename không theo đúng quy ước) -- lúc đó
+    không ép ràng buộc gì thêm, coi như không có tín hiệu độc lập để dùng."""
+    keywords = filename_keyword_words(row_id)
+    if not keywords:
+        return None
+    for i, group in enumerate(groups):
+        name_ascii = strip_vn_diacritics(group.get("name", "")).lower()
+        if all(kw in name_ascii for kw in keywords):
+            return i
+    return None
 
 
 def parse_args() -> argparse.Namespace:
@@ -212,6 +245,7 @@ def select_groups(
     level: str,
     rng: random.Random,
     text_element_ids: set,
+    required_group_index: Optional[int] = None,
 ) -> Tuple[List[Dict[str, Any]], float, set]:
     """Trục BỀ RỘNG — chọn nhóm khái niệm nào được giữ.
 
@@ -223,6 +257,12 @@ def select_groups(
     quan) mà tình cờ chứa 1 element chữ — nếu giữ nguyên cả nhóm thì short/medium sẽ
     phình to dù chỉ cần đúng element chữ đó. build_subjson dùng tập này để CHỈ giữ
     phần tử chữ, bỏ qua phần còn lại của nhóm catch-all.
+
+    `required_group_index`: nhóm khớp với chủ thể chính rút từ TÊN FILE (tín hiệu
+    độc lập với salience của step1a — xem find_required_group_index). Luôn được ép
+    giữ, kể cả khi step1a xếp nó không phải group 0 và nó cũng không phải cultural.
+    Không đây thì short có thể loại hẳn đúng chủ thể chính chỉ vì step1a lỡ xếp
+    salience sai, dẫn tới checklist thiếu hẳn thứ bắt buộc phải có.
     """
     if not groups:
         return [], 1.0, set()
@@ -253,6 +293,8 @@ def select_groups(
         base_kept.add(i)
 
     kept_indices = set(base_kept)
+    if required_group_index is not None:
+        kept_indices.add(required_group_index)
     text_forced_ids: set = set()
     if text_element_ids:
         for i, group in enumerate(groups):
@@ -360,11 +402,23 @@ def build_subjson(
         el.get("id") for el in schema.elements_of(target) if el.get("type") == "text"
     }
 
+    required_group_index = find_required_group_index(groups, row_id)
+
     selected_groups, breadth_drop, text_forced_ids = select_groups(
-        groups, level, rng, text_element_ids,
+        groups, level, rng, text_element_ids, required_group_index,
     )
     if not selected_groups:
         return None
+
+    # Vị trí của nhóm bắt buộc (nếu có) trong danh sách ĐÃ LỌC -- dùng sau khi lắp
+    # xong out_groups để lấy đúng mệnh đề rank-0 của nó làm required_subject.
+    required_out_index: Optional[int] = None
+    if required_group_index is not None:
+        # So khớp theo id() (không phải giá trị) để không lẫn với nhóm khác trùng tên.
+        for pos, g in enumerate(selected_groups):
+            if g is groups[required_group_index]:
+                required_out_index = pos
+                break
 
     lo_rank, hi_rank = cfg["max_rank"]
     element_cap = cfg["element_cap"]
@@ -471,6 +525,16 @@ def build_subjson(
         out_groups, so_luong_lines, scene, cfg.get("max_checklist_words"),
     )
 
+    # Mệnh đề BẮT BUỘC tuyệt đối -- rút từ tên file (độc lập với salience của step1a),
+    # xem find_required_group_index(). rank-0 luôn ở vị trí đầu trong facts của nhóm
+    # và không bao giờ bị trim_checklist_to_word_budget cắt (floor=1/nhóm), nên luôn
+    # còn nguyên trong checklist ở trên -- required_subject chỉ là CON TRỎ tới đúng
+    # mệnh đề đó để bước 2b biết cái nào là "không được nới lỏng dù --max_missing > 0".
+    required_subject = (
+        out_groups[required_out_index]["facts"][0]
+        if required_out_index is not None else None
+    )
+
     return {
         "id": row_id,
         "detail_level": level,
@@ -480,6 +544,7 @@ def build_subjson(
         "scene": scene,
         "groups": out_groups,
         "checklist": checklist,
+        "required_subject": required_subject,
     }
 
 

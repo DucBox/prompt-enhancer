@@ -60,17 +60,27 @@ def make_client() -> llm.LLMClient:
     )
 
 
-def decide(verdict: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:
+def decide(verdict: Dict[str, Any], args: argparse.Namespace,
+          required_subject: Optional[str] = None) -> Dict[str, Any]:
     """Quyết định đạt/loại từ đầu ra của judge, theo ngưỡng do CLI đặt.
 
     Chỉ xét THIẾU/THÊM so với checklist. Văn phong (dịch máy, liệt kê máy móc...)
     không phải tiêu chí loại bỏ ở đây — đó là việc của bước 2a.
+
+    `required_subject` (rút từ TÊN FILE, xem step1b_build_subjson.find_required_group_index)
+    là chủ thể chính BẮT BUỘC tuyệt đối -- thiếu nó thì loại NGAY, không phụ thuộc
+    --max_missing. Không có ràng buộc riêng này thì việc nới --max_missing > 0 để
+    giảm tỉ lệ loại có thể vô tình cho lọt đúng trường hợp nguy hiểm nhất: prompt
+    thiếu hẳn chủ thể chính (vd "hủ tiếu Nam Vang") nhưng vẫn đạt vì các mệnh đề
+    thiếu khác được xem ngang hàng và nằm trong ngưỡng cho phép.
     """
     missing = verdict.get("missing") or []
     extra = verdict.get("extra") or []
 
     reasons: List[str] = []
-    if len(missing) > args.max_missing:
+    if required_subject and required_subject in missing:
+        reasons.append("thiếu chủ thể chính bắt buộc: '{}'".format(required_subject))
+    elif len(missing) > args.max_missing:
         reasons.append("thiếu {} mệnh đề".format(len(missing)))
     if extra:
         reasons.append("thêm {} thông tin".format(len(extra)))
@@ -145,7 +155,7 @@ def main() -> None:
         path = cache_dir / "{}.json".format(key_of(row))
         if not path.is_file():
             continue
-        result = decide(io_utils.read_json(path), args)
+        result = decide(io_utils.read_json(path), args, row.get("required_subject"))
         if result["passed"]:
             passed.append(row)
         else:

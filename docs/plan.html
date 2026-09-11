@@ -524,6 +524,27 @@ long     bề rộng: giữ 4/7 nhóm  (xô nhựa, sọt trái cây bị loại
     2a vẫn thấy tên nhóm đó qua trường "name", nên checklist phải còn ít nhất một mệnh đề tương
     ứng để không chấm oan). Kết quả đo lại: short p90/max còn đúng 16 từ; medium còn đúng 50 từ.
   </div>
+
+  <div class="callout">
+    <div class="t">Chủ thể chính bắt buộc — tín hiệu độc lập rút từ TÊN FILE</div>
+    <code>required_group_index</code> = việc "nhóm nào là chủ thể chính" hiện chỉ dựa vào salience
+    do step1a (LLM) tự xếp — nếu step1a lỡ xếp sai, không có gì đảm bảo checklist còn giữ đúng
+    chủ thể chính (vd "hủ tiếu Nam Vang", "rước kiệu"). Tên file trong bộ dữ liệu này lại chính là
+    slug không dấu của chủ thể chính thật (<code>ruoc_kieu_002128.json</code> →
+    "rước kiệu", <code>hu_tieu_nam_vang_001001.json</code> → "hủ tiếu Nam Vang") — một tín hiệu
+    <strong>độc lập với salience của step1a</strong>.
+    <br><br>
+    Dùng tín hiệu này để: (1) ép nhóm khớp filename luôn được giữ ở mọi mức, kể cả khi nó không
+    phải nhóm chính và không phải nhóm văn hoá theo step1a; (2) đưa mệnh đề rank-0 của nhóm đó vào
+    <code>required_subject</code> — ở bước 2b, thiếu đúng mệnh đề này thì <strong>loại ngay lập
+    tức, không phụ thuộc <code>--max_missing</code></strong>. Không có ràng buộc riêng này thì
+    việc nới lỏng <code>--max_missing</code> để giảm tỉ lệ loại có thể vô tình cho lọt đúng trường
+    hợp nguy hiểm nhất: prompt thiếu hẳn chủ thể chính nhưng vẫn đạt vì mọi mệnh đề thiếu được xét
+    ngang hàng nhau.
+    <br><br>
+    <span class="muted">Không đổi thứ tự nhóm (group 0 vẫn do step1a quyết định) — chỉ thêm một
+    ràng buộc riêng, độc lập, để tránh rủi ro reorder nhầm khi slug khớp nhầm nhóm.</span>
+  </div>
 </div>
 
 

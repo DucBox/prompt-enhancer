@@ -201,6 +201,50 @@ class TestBuildSubJson(unittest.TestCase):
         self.assertNotIn("boi_canh", self.build("short")["scene"])
         self.assertIn("boi_canh", self.build("long")["scene"])
 
+    def test_required_subject_from_filename_is_force_kept_even_if_not_main_or_cultural(self):
+        """Chốt chặn cho ý user: tên file (vd 'ruoc_kieu_002128') là tín hiệu ĐỘC LẬP
+        cho chủ thể chính -- nếu step1a lỡ xếp salience sai (nhóm khớp filename
+        không phải group 0, không cultural, không chứa chữ), nhóm đó vẫn PHẢI được
+        giữ ở short, không được loại theo ngân sách bề rộng thông thường."""
+        target = {
+            "high_level_description": "Một cảnh đông người.",
+            "style_description": {"medium": "photograph", "photo": "wide"},
+            "compositional_deconstruction": {
+                "background": "Đường phố.",
+                "elements": [{"id": i, "type": "obj", "desc": "d"} for i in range(4)],
+            },
+        }
+        decomp = {
+            "concept_groups": [
+                {"name": "đám đông xem hội", "member_ids": [0], "cardinality": "vague",
+                 "cultural": False},
+                {"name": "cờ trang trí", "member_ids": [1], "cardinality": "vague",
+                 "cultural": False},
+                # Nhóm khớp filename "ruoc_kieu" -- không phải group 0, không cultural.
+                {"name": "đám rước kiệu", "member_ids": [2], "cardinality": "vague",
+                 "cultural": False},
+                {"name": "cảnh nền", "member_ids": [3], "cardinality": "vague",
+                 "cultural": False},
+            ],
+            "facts": {
+                "0": [{"rank": 0, "kind": "subject", "text": "đám đông"}],
+                "1": [{"rank": 0, "kind": "subject", "text": "lá cờ"}],
+                "2": [{"rank": 0, "kind": "subject", "text": "đám rước kiệu"}],
+                "3": [{"rank": 0, "kind": "subject", "text": "hàng cây"}],
+            },
+        }
+        short = s1b.build_subjson("ruoc_kieu_002128", target, decomp, "short",
+                                  random.Random("s"))
+        names = [g["name"] for g in short["groups"]]
+        self.assertIn("đám rước kiệu", names)
+        self.assertEqual(short["required_subject"], "đám rước kiệu")
+        self.assertIn("đám rước kiệu", short["checklist"])
+
+    def test_required_subject_is_none_when_filename_does_not_match_any_group(self):
+        sub = s1b.build_subjson("img1", SAMPLE_TARGET, SAMPLE_DECOMP, "short",
+                                random.Random("s"))
+        self.assertIsNone(sub["required_subject"])
+
     def test_catchall_group_with_one_text_element_is_trimmed_to_that_element(self):
         """Chốt chặn cho bug thật (server test_3): 'cảnh nền' gom 13 element không
         liên quan, tình cờ chứa 1 element chữ (biển hiệu) -- giữ nguyên CẢ nhóm chỉ
@@ -695,6 +739,30 @@ class TestFilterDecision(unittest.TestCase):
 
     def test_handles_absent_keys(self):
         self.assertTrue(s2b.decide({}, _Args())["passed"])
+
+    def test_required_subject_missing_fails_even_with_max_missing_tolerance(self):
+        """Chốt chặn cho ý user: chủ thể chính (rút từ tên file, vd 'hủ tiếu Nam
+        Vang') phải BẮT BUỘC tuyệt đối -- thiếu nó thì loại ngay dù --max_missing
+        đang cho phép bỏ qua các mệnh đề khác."""
+        class Tolerant(_Args):
+            max_missing = 5
+
+        verdict = {"missing": ["hủ tiếu Nam Vang"], "extra": []}
+        out = s2b.decide(verdict, Tolerant(), required_subject="hủ tiếu Nam Vang")
+        self.assertFalse(out["passed"])
+
+    def test_required_subject_present_does_not_block_pass(self):
+        verdict = {"missing": [], "extra": []}
+        out = s2b.decide(verdict, _Args(), required_subject="hủ tiếu Nam Vang")
+        self.assertTrue(out["passed"])
+
+    def test_no_required_subject_falls_back_to_normal_tolerance(self):
+        class Tolerant(_Args):
+            max_missing = 1
+
+        verdict = {"missing": ["màu xanh"], "extra": []}
+        out = s2b.decide(verdict, Tolerant(), required_subject=None)
+        self.assertTrue(out["passed"])
 
 
 # =============================================================================
