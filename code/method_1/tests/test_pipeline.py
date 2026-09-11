@@ -332,6 +332,43 @@ class TestBuildSubJson(unittest.TestCase):
                     self.assertIn(value, sub["checklist"],
                                  "{}: thiếu '{}' trong checklist".format(level, value))
 
+    def test_default_medium_photograph_excluded_from_scene(self):
+        """Chốt chặn cho bug thật (server test_5): medium=='photograph' chiếm 994/1000
+        mẫu -- gần như hằng số, không mang thông tin phân biệt. Bắt buộc checklist
+        phải có 'photograph' khiến 44/98 lượt loại ở test_5 là oan (model không sai,
+        chỉ đơn giản không ai đặt hàng ảnh lại nói 'đây là một bức ảnh')."""
+        target = dict(SAMPLE_TARGET)
+        target["style_description"] = dict(SAMPLE_TARGET["style_description"])
+        target["style_description"]["medium"] = "photograph"
+        target["style_description"]["photo"] = "eye-level medium shot, sharp focus"
+        scene = s1b.build_scene(target, "long")
+        self.assertNotIn("loai_anh", scene)
+
+    def test_non_default_medium_kept_in_scene(self):
+        target = dict(SAMPLE_TARGET)
+        target["style_description"] = dict(SAMPLE_TARGET["style_description"])
+        target["style_description"]["medium"] = "illustration"
+        scene = s1b.build_scene(target, "long")
+        self.assertEqual(scene.get("loai_anh"), "illustration")
+
+    def test_default_camera_angle_excluded_from_scene(self):
+        """Chốt chặn cho bug thật (server test_5): 'eye-level medium shot' là góc máy
+        mặc định của phần lớn ảnh -- STEP2A_SYSTEM cấm dùng ngôn ngữ kỹ thuật khung
+        hình nên model đúng khi bỏ qua, nhưng checklist cũ vẫn bắt phải nhắc tới,
+        gây loại oan hàng loạt."""
+        target = dict(SAMPLE_TARGET)
+        target["style_description"] = dict(SAMPLE_TARGET["style_description"])
+        target["style_description"]["photo"] = "eye-level medium shot, sharp focus on the subject"
+        scene = s1b.build_scene(target, "long")
+        self.assertNotIn("goc_chup", scene)
+
+    def test_notable_camera_angle_kept_in_scene(self):
+        target = dict(SAMPLE_TARGET)
+        target["style_description"] = dict(SAMPLE_TARGET["style_description"])
+        target["style_description"]["photo"] = "high-angle wide shot, deep focus"
+        scene = s1b.build_scene(target, "long")
+        self.assertIn("high-angle", scene.get("goc_chup", ""))
+
     def test_duplicate_rank0_subjects_are_not_dropped_across_members(self):
         """Chốt chặn cho bug thật (server test_3): 2 người phụ nữ trong cùng một
         nhóm cùng bắt đầu bằng 'người phụ nữ' -- dedup toàn nhóm từng xoá mất

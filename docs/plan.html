@@ -355,6 +355,28 @@ element type=="text":  31/7831 = 0,4%  (hiếm hơn dự kiến)</pre>
     prompt thực tế cần đo lại sau khi chạy lại bước 2a.</span>
   </div>
 
+  <div class="callout">
+    <div class="t">Sự cố thực tế: checklist scene mâu thuẫn với chính luật cấm ở bước 2a</div>
+    Chạy full pipeline (<code>test_5</code>, 100 ảnh) cho thấy tỉ lệ đạt ở bước 2b chỉ
+    63% (medium) và 62% (long) — thấp hơn hẳn short (77%). Soi 98 prompt bị loại: <strong>80%
+    bị loại vì lý do liên quan tới scene</strong> (loại ảnh / góc chụp), gồm hai nguyên nhân:
+    <br><br>
+    <strong>1. <code>loai_anh = "photograph"</code> chiếm 994/1000 mẫu (99,4%)</strong> —
+    gần như hằng số, không phân biệt được gì, nhưng checklist vẫn bắt buộc phải nhắc tới →
+    44/98 lượt loại chỉ vì "thiếu photograph", dù không có người dùng thật nào tự nhiên nói
+    "đây là một bức ảnh".
+    <br><br>
+    <strong>2. <code>goc_chup</code> lấy nguyên văn cụm kỹ thuật tiếng Anh</strong> (vd
+    "eye-level medium shot, sharp focus") — trong khi chính hệ thống prompt ở bước 2a lại
+    <em>cấm</em> dùng ngôn ngữ kỹ thuật khung hình. Model làm đúng (bỏ qua), nhưng bị 2b
+    chấm sai vì checklist đòi đúng cụm kỹ thuật đó — hai bước tự mâu thuẫn nhau.
+    <br><br>
+    Sửa: chỉ đưa <code>loai_anh</code> vào checklist khi khác giá trị mặc định
+    ("photograph"); chỉ đưa <code>goc_chup</code> vào khi câu tả chứa từ khoá góc máy
+    <em>đáng chú ý</em> (high-angle, low-angle, aerial, close-up, wide shot...) — bỏ hẳn
+    khi chỉ là góc mặc định (eye-level, medium shot, deep/sharp focus).
+  </div>
+
   <div class="ex-lbl">Ví dụ — cùng một ảnh, hai mức nén</div>
 <pre>Ảnh gốc: chợ nổi Cái Răng — 7 element, trong đó có cả một
          element 17 từ tả "cái xô nhựa đỏ trên boong thuyền"

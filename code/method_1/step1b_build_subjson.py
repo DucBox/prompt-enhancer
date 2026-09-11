@@ -104,6 +104,37 @@ def first_clause(text: str, max_words: int = 12) -> str:
     return s.rstrip(".").strip()
 
 
+
+# "photograph" chiếm 99.4% mẫu (994/1000) — mặc định gần như tuyệt đối, không mang
+# thông tin phân biệt. Chỉ đáng đưa vào checklist khi medium KHÁC giá trị mặc định này
+# (illustration, 3d_render, painting...) — lúc đó mới là một lựa chọn thật sự đáng nói.
+DEFAULT_MEDIUM = "photograph"
+
+# Góc máy "mặc định/tầm thường" — không ai đặt hàng ảnh lại nói ra những từ này.
+# Chỉ giữ lại goc_chup khi câu tả góc máy chứa một từ khoá THỰC SỰ đáng chú ý
+# (góc cao/thấp, cận cảnh, toàn cảnh, trên không...); nếu không có từ khoá nào trong
+# số này thì bỏ hẳn goc_chup — đây cũng chính là loại "ngôn ngữ kỹ thuật khung hình"
+# mà STEP2A_SYSTEM đang cấm model dùng, nên không thể bắt checklist đòi hỏi nó.
+NOTABLE_ANGLE_KEYWORDS = (
+    "high-angle", "high angle", "low-angle", "low angle",
+    "aerial", "bird's-eye", "bird's eye", "overhead", "top-down",
+    "drone", "from above", "from below", "worm's-eye", "worm's eye",
+    "close-up", "closeup", "extreme close-up", "macro",
+    "wide shot", "full shot", "dutch angle",
+)
+
+
+def notable_angle_clause(shot: str) -> Optional[str]:
+    """Trả về mệnh đề chứa từ khoá góc máy đáng chú ý, hoặc None nếu góc máy mặc định."""
+    s = str(shot or "")
+    low = s.lower()
+    for clause in s.split(","):
+        clause_low = clause.lower()
+        if any(kw in clause_low for kw in NOTABLE_ANGLE_KEYWORDS):
+            return clause.strip().rstrip(".")
+    return None
+
+
 def build_scene(target: Dict[str, Any], level: str) -> Dict[str, Any]:
     """Gợi ý bối cảnh & phong cách, nén theo mức."""
     cfg = LEVEL_CONFIG[level]
@@ -114,11 +145,15 @@ def build_scene(target: Dict[str, Any], level: str) -> Dict[str, Any]:
     fields = cfg["style_fields"]
 
     if "medium" in fields and style.get("medium"):
-        scene["loai_anh"] = style["medium"]
+        medium = style["medium"]
+        if str(medium).strip().lower() != DEFAULT_MEDIUM:
+            scene["loai_anh"] = medium
     if "shot" in fields:
         shot = style.get("photo") or style.get("art_style")
         if shot:
-            scene["goc_chup"] = first_clause(shot, 8)
+            clause = notable_angle_clause(shot)
+            if clause:
+                scene["goc_chup"] = first_clause(clause, 8)
     if "lighting" in fields and style.get("lighting"):
         scene["anh_sang"] = first_clause(style["lighting"], 8)
     if "aesthetics" in fields and style.get("aesthetics"):
