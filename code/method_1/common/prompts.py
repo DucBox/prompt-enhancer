@@ -262,10 +262,32 @@ STEP2B_SYSTEM = r"""Bạn là bộ kiểm duyệt dữ liệu huấn luyện. B�
 
 Hãy kiểm tra hai điều:
   A. THIẾU  — có mệnh đề nào trong danh sách mà prompt hoàn toàn không nhắc tới không?
-             (Diễn đạt khác đi nhưng cùng nghĩa thì VẪN TÍNH LÀ CÓ nhắc tới.)
+             (Diễn đạt khác đi nhưng cùng nghĩa thì VẪN TÍNH LÀ CÓ nhắc tới. Điều này áp
+              dụng CẢ KHI prompt viết bằng ngôn ngữ khác với mệnh đề — ví dụ mệnh đề ghi
+              "bright overcast daylight" mà prompt viết "ánh sáng ban ngày dịu, trời âm u"
+              thì vẫn tính là ĐÃ nhắc tới, không phải thiếu. Ngôn ngữ không quan trọng,
+              chỉ nghĩa mới quan trọng.)
   B. THÊM   — prompt có nói ra thông tin cụ thể nào KHÔNG hề có trong danh sách không?
              (Từ nối, cách hành văn, lời dẫn kiểu "mình muốn một tấm ảnh" KHÔNG tính là thêm.
-              Chỉ tính khi thêm vật thể, màu sắc, số lượng, hành động, địa điểm mới.)
+              Chỉ tính khi thêm vật thể, màu sắc, số lượng, hành động, địa điểm mới.
+              Dịch một mệnh đề sang ngôn ngữ khác KHÔNG tính là thêm, dù không giống chữ.)
+
+NGOẠI LỆ DUY NHẤT — thuật ngữ văn hoá Việt Nam: nếu một mệnh đề là tên riêng hoặc khái niệm
+mang bản sắc Việt Nam (ví dụ: áo dài, khăn xếp, chợ nổi Cái Răng, cây bẹo, thanh đồng, lễ Hầu
+đồng, bánh chưng...), tên đó BẮT BUỘC phải giữ nguyên bằng tiếng Việt. Nếu prompt dịch nó sang
+tiếng Anh hoặc thay bằng một khái niệm khác (ví dụ "áo dài" → "Vietnamese dress", "thanh đồng"
+→ "shaman") thì tính là THIẾU mệnh đề đó — đây là lỗi cần bắt được. Các mệnh đề còn lại
+(màu sắc, ánh sáng, vị trí, hành động, bối cảnh...) không bị ràng buộc ngôn ngữ.
+
+MỆNH ĐỀ VỊ TRÍ CÓ LẶP TÊN CHỦ THỂ: một số mệnh đề vị trí lặp lại tên chủ thể/nhóm ở cuối câu,
+ví dụ "ở tai phải thanh đồng", "cầm ở tay trái thanh đồng". Một prompt viết tự nhiên KHÔNG lặp
+lại tên chủ thể cho từng chi tiết như vậy (chỉ nhắc ngầm qua ngữ cảnh đã thiết lập) —
+CHỈ VÌ THIẾU TÊN CHỦ THỂ LẶP LẠI thì KHÔNG được tính là thiếu.
+Nhưng phần vị trí CỤ THỂ vẫn phải đúng — trái/phải, tay/tai/cổ, trên/dưới... phải khớp:
+  - Mệnh đề "ở tai phải thanh đồng", prompt viết "...bông tai vàng bên tai phải" → ĐÃ nhắc tới.
+  - Mệnh đề "ở tai phải thanh đồng", prompt viết "...bông tai vàng bên tai trái" → SAI vị trí,
+    vẫn tính là THIẾU (không được bỏ qua chỉ vì đây là mệnh đề vị trí).
+  - Mệnh đề "ở tai phải thanh đồng", prompt không nhắc bên nào cả → THIẾU.
 
 Chỉ trả về đúng một JSON object, không giải thích:
 {

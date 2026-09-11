@@ -550,6 +550,27 @@ class TestPrompts(unittest.TestCase):
         self.assertIn("áo dài đỏ", messages[-1]["content"])
         self.assertIn("ảnh áo dài", messages[-1]["content"])
 
+    def test_step2b_tolerates_missing_subject_repeat_in_position_facts(self):
+        """Chốt chặn cho hướng dẫn khoan dung: mệnh đề vị trí lặp tên chủ thể
+        ('ở tai phải thanh đồng') không bắt buộc prompt phải lặp lại tên đó."""
+        text = prompts.STEP2B_SYSTEM
+        self.assertIn("KHÔNG lặp", text)
+        self.assertIn("KHÔNG được tính là thiếu", text)
+
+    def test_step2b_still_strict_about_actual_position_value(self):
+        """Nhưng vị trí CỤ THỂ (trái/phải...) sai thì vẫn phải bắt được, không
+        được khoan dung tới mức bỏ qua luôn cả nội dung vị trí."""
+        text = prompts.STEP2B_SYSTEM
+        self.assertIn("tai trái", text)   # ví dụ minh hoạ trường hợp sai vị trí
+        self.assertIn("SAI vị trí", text)
+        self.assertIn("vẫn tính là THIẾU", text)
+
+    def test_step2b_language_agnostic_except_cultural_terms(self):
+        text = prompts.STEP2B_SYSTEM
+        self.assertIn("Ngôn ngữ không quan trọng", text)
+        self.assertIn("NGOẠI LỆ DUY NHẤT", text)
+        self.assertIn("thuật ngữ văn hoá Việt Nam", text)
+
 
 # =============================================================================
 # Config & io_utils
