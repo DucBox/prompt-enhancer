@@ -267,18 +267,13 @@ Hãy kiểm tra hai điều:
              (Từ nối, cách hành văn, lời dẫn kiểu "mình muốn một tấm ảnh" KHÔNG tính là thêm.
               Chỉ tính khi thêm vật thể, màu sắc, số lượng, hành động, địa điểm mới.)
 
-Ngoài ra đánh dấu "robotic": true nếu prompt đọc như một bản dịch máy của dữ liệu có cấu trúc —
-liệt kê máy móc từng vật thể, hoặc dùng ngôn ngữ kỹ thuật về khung hình
-("nằm ở góc trên bên trái", "chiếm phần dưới khung hình", "ở tiền cảnh").
-
 Chỉ trả về đúng một JSON object, không giải thích:
 {
   "missing": ["mệnh đề bị thiếu"],
   "extra": ["thông tin bị thêm"],
-  "robotic": false,
   "verdict": "pass"
 }
-verdict là "pass" khi missing rỗng, extra rỗng và robotic bằng false. Ngược lại là "fail"."""
+verdict là "pass" khi missing rỗng và extra rỗng. Ngược lại là "fail"."""
 
 
 def build_step2b_messages(facts: List[str], prompt_text: str) -> List[Dict[str, str]]:

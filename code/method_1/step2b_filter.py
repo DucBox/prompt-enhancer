@@ -8,9 +8,12 @@
             rejected.jsonl   cặp bị loại, kèm lý do
             report.json
 
-Kiểm tra prompt không THÊM và không THIẾU so với checklist, đồng thời không
-đọc như bản dịch máy của JSON. Bỏ bước này thì checklist hết là thước đo đáng tin
-và toàn bộ phần đánh giá ở bước 5 sập theo.
+Kiểm tra prompt không THÊM và không THIẾU so với checklist (rút từ sub_json).
+Bỏ bước này thì checklist hết là thước đo đáng tin và toàn bộ phần đánh giá
+ở bước 5 sập theo.
+
+KHÔNG lọc theo văn phong (dịch máy / liệt kê máy móc) — đó là vấn đề chất lượng
+hành văn, xử lý ở bước 2a (system prompt + few-shot), không phải tiêu chí loại bỏ ở đây.
 
 Nên dùng model KHÁC HỌ với model đã sinh prompt ở bước 2a để tránh thiên vị
 (có thể trỏ riêng qua JUDGE_BASE_URL / JUDGE_MODEL trong .env).
@@ -37,8 +40,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--temperature", type=float, default=0.0)
     p.add_argument("--max_tokens", type=int, default=1024)
-    p.add_argument("--allow_robotic", action="store_true",
-                   help="Không loại prompt bị đánh dấu là văn máy móc")
     p.add_argument("--max_missing", type=int, default=0,
                    help="Số mệnh đề được phép thiếu (mặc định 0)")
     p.add_argument("--overwrite", action="store_true")
@@ -60,25 +61,25 @@ def make_client() -> llm.LLMClient:
 
 
 def decide(verdict: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:
-    """Quyết định đạt/loại từ đầu ra của judge, theo ngưỡng do CLI đặt."""
+    """Quyết định đạt/loại từ đầu ra của judge, theo ngưỡng do CLI đặt.
+
+    Chỉ xét THIẾU/THÊM so với checklist. Văn phong (dịch máy, liệt kê máy móc...)
+    không phải tiêu chí loại bỏ ở đây — đó là việc của bước 2a.
+    """
     missing = verdict.get("missing") or []
     extra = verdict.get("extra") or []
-    robotic = bool(verdict.get("robotic", False))
 
     reasons: List[str] = []
     if len(missing) > args.max_missing:
         reasons.append("thiếu {} mệnh đề".format(len(missing)))
     if extra:
         reasons.append("thêm {} thông tin".format(len(extra)))
-    if robotic and not args.allow_robotic:
-        reasons.append("văn máy móc")
 
     return {
         "passed": not reasons,
         "reasons": reasons,
         "missing": missing,
         "extra": extra,
-        "robotic": robotic,
     }
 
 

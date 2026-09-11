@@ -311,37 +311,33 @@ class TestVerbalize(unittest.TestCase):
 
 class _Args:
     max_missing = 0
-    allow_robotic = False
 
 
 class TestFilterDecision(unittest.TestCase):
 
     def test_clean_verdict_passes(self):
-        out = s2b.decide({"missing": [], "extra": [], "robotic": False}, _Args())
+        out = s2b.decide({"missing": [], "extra": []}, _Args())
         self.assertTrue(out["passed"])
 
     def test_missing_fails(self):
-        out = s2b.decide({"missing": ["áo dài"], "extra": [], "robotic": False}, _Args())
+        out = s2b.decide({"missing": ["áo dài"], "extra": []}, _Args())
         self.assertFalse(out["passed"])
 
     def test_extra_fails(self):
-        out = s2b.decide({"missing": [], "extra": ["con mèo"], "robotic": False}, _Args())
+        out = s2b.decide({"missing": [], "extra": ["con mèo"]}, _Args())
         self.assertFalse(out["passed"])
 
-    def test_robotic_fails_by_default_but_can_be_allowed(self):
+    def test_robotic_field_is_ignored_if_present(self):
+        """Văn phong không phải tiêu chí loại bỏ ở bước 2b — dù verdict có 'robotic' hay không."""
         verdict = {"missing": [], "extra": [], "robotic": True}
-        self.assertFalse(s2b.decide(verdict, _Args())["passed"])
-
-        class Lenient(_Args):
-            allow_robotic = True
-
-        self.assertTrue(s2b.decide(verdict, Lenient())["passed"])
+        self.assertTrue(s2b.decide(verdict, _Args())["passed"])
+        self.assertNotIn("robotic", s2b.decide(verdict, _Args()))
 
     def test_missing_tolerance_is_configurable(self):
         class Tolerant(_Args):
             max_missing = 1
 
-        verdict = {"missing": ["x"], "extra": [], "robotic": False}
+        verdict = {"missing": ["x"], "extra": []}
         self.assertTrue(s2b.decide(verdict, Tolerant())["passed"])
 
     def test_handles_absent_keys(self):
