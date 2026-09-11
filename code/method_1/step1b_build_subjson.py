@@ -51,6 +51,7 @@ LEVEL_CONFIG = {
         "group_element_cap": 2,
         "max_cultural_groups": 2,
         "element_cap": 6,
+        "max_checklist_words": 16,
         "length_hint": "8-20 từ",
         "keep_background": False,
         "style_fields": ("medium", "shot"),
@@ -62,6 +63,7 @@ LEVEL_CONFIG = {
         "group_element_cap": 4,
         "max_cultural_groups": 3,
         "element_cap": 10,
+        "max_checklist_words": 50,
         "length_hint": "30-60 từ",
         "keep_background": "short",
         "style_fields": ("medium", "shot", "lighting"),
@@ -73,6 +75,7 @@ LEVEL_CONFIG = {
         "group_element_cap": None,        # không giới hạn riêng, dùng element_cap chung
         "max_cultural_groups": None,      # không giới hạn
         "element_cap": 24,
+        "max_checklist_words": None,      # không giới hạn -- xem callout "đuôi 95%" ở plan.pdf
         "length_hint": "100-200 từ",
         "keep_background": True,
         "style_fields": ("medium", "shot", "lighting", "aesthetics"),
@@ -278,6 +281,70 @@ def select_facts(
     return kept
 
 
+def trim_checklist_to_word_budget(
+    out_groups: List[Dict[str, Any]],
+    so_luong_lines: List[Tuple[int, str]],
+    scene: Dict[str, Any],
+    max_words: Optional[int],
+) -> List[str]:
+    """Trần TỔNG SỐ TỪ của checklist -- không có trần này, đuôi phân phối vẫn có thể
+    đòi hỏi checklist chứa nhiều từ hơn hẳn length_hint cho phép (bug thật: server
+    test_6, p90 short cần ~30 từ cho ngân sách chỉ 8-20 từ -- mâu thuẫn trực tiếp với
+    luật "PHẢI ĐẦY ĐỦ" ở STEP2A_SYSTEM, vì checklist đưa ra vốn đã không thể nói hết
+    trong khoảng từ cho phép).
+
+    Thứ tự ưu tiên GIỮ (drop theo chiều ngược lại, thấp ưu tiên nhất trước):
+      1. mệnh đề của các nhóm, theo đúng thứ tự salience -- nhóm cuối bị đụng tới trước
+      2. dòng "số lượng"
+      3. scene (ánh sáng, góc chụp...)
+    Không bao giờ trim một nhóm xuống dưới 1 mệnh đề -- nhóm đó vẫn được đưa cho 2a
+    viết (qua "name"), nên checklist phải còn ít nhất một mệnh đề tương ứng để 2b
+    không chấm oan phần nội dung mà 2a hoàn toàn có quyền nhắc tới.
+
+    Sửa TRỰC TIẾP `out_groups[i]["facts"]` và `scene` (in-place) để những gì đưa cho
+    2a viết (qua sub_json["groups"]/["scene"]) luôn khớp đúng với checklist chấm điểm
+    ở 2b -- tách rời hai thứ này ra là lặp lại đúng bug đã sửa trước đó (thêm scene
+    vào spec nhưng quên thêm vào checklist).
+    """
+    def wc(s: str) -> int:
+        return len(s.split())
+
+    if max_words is None:
+        checklist = [f for g in out_groups for f in g["facts"]]
+        checklist += [line for _, line in so_luong_lines]
+        checklist += [v for k, v in scene.items() if v and k != "khong_khi"]
+        return checklist
+
+    scene_keys = [k for k, v in scene.items() if v and k != "khong_khi"]
+    total = (
+        sum(wc(f) for g in out_groups for f in g["facts"])
+        + sum(wc(line) for _, line in so_luong_lines)
+        + sum(wc(scene[k]) for k in scene_keys)
+    )
+
+    while total > max_words and scene_keys:
+        k = scene_keys.pop()
+        total -= wc(scene[k])
+        del scene[k]
+
+    while total > max_words and so_luong_lines:
+        _, line = so_luong_lines.pop()
+        total -= wc(line)
+
+    gi = len(out_groups) - 1
+    while total > max_words and gi >= 0:
+        facts = out_groups[gi]["facts"]
+        if len(facts) > 1:
+            total -= wc(facts.pop())
+        else:
+            gi -= 1
+
+    checklist = [f for g in out_groups for f in g["facts"]]
+    checklist += [line for _, line in so_luong_lines]
+    checklist += [scene[k] for k in scene_keys]
+    return checklist
+
+
 def build_subjson(
     row_id: str,
     target: Dict[str, Any],
@@ -303,7 +370,7 @@ def build_subjson(
     element_cap = cfg["element_cap"]
 
     out_groups: List[Dict[str, Any]] = []
-    checklist: List[str] = []
+    so_luong_lines: List[Tuple[int, str]] = []
     n_elements_used = 0
     n_facts_kept = 0
     n_facts_total = sum(len(v) for v in facts_map.values())
@@ -367,7 +434,6 @@ def build_subjson(
             "facts": group_facts,
         }
         out_groups.append(entry)
-        checklist.extend(group_facts)
 
         # Ràng buộc số lượng chỉ phát khi đếm được chính xác và có từ 2 cá thể trở lên.
         # BỎ QUA khi tên nhóm đã là danh từ tập hợp/cặp (đôi, cặp, bộ...) -- lúc đó
@@ -388,7 +454,7 @@ def build_subjson(
             except ValueError:
                 n = 0
             if n >= 2:
-                checklist.append("số lượng: {} {}".format(n, group["name"]))
+                so_luong_lines.append((group_index, "số lượng: {} {}".format(n, group["name"])))
 
     depth_drop = 1.0 - (n_facts_kept / n_facts_total) if n_facts_total else 0.0
     scene = build_scene(target, level)
@@ -401,7 +467,9 @@ def build_subjson(
     # nội dung cụ thể để 2b chấm điểm -- gây 71% prompt long bị loại oan (server test_6)
     # vì đây vốn là một danh sách tag mood tiếng Anh rời rạc, không phải câu mô tả mà
     # người dùng thật sẽ nói ra.
-    checklist.extend(v for k, v in scene.items() if v and k != "khong_khi")
+    checklist = trim_checklist_to_word_budget(
+        out_groups, so_luong_lines, scene, cfg.get("max_checklist_words"),
+    )
 
     return {
         "id": row_id,

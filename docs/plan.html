@@ -331,6 +331,19 @@ element type=="text":  31/7831 = 0,4%  (hiếm hơn dự kiến)</pre>
   không phải một chế độ riêng.</span></p>
 
   <div class="callout">
+    <div class="t">Khoảng từ mục tiêu có chuẩn tham chiếu nào không?</div>
+    Đã research: không có benchmark học thuật/công nghiệp nào định nghĩa "short/medium/long"
+    theo số từ cố định — các mốc phổ biến trên blog prompt engineering chỉ là quy ước, không
+    phải kết quả đo đạc. Đáng chú ý: paper <em>"Harnessing Caption Detailness for Data-Efficient
+    Text-to-Image Generation"</em> (arXiv 2505.15172, 5/2025) phê phán chính cách chọn dữ liệu
+    theo độ dài, đề xuất đo "detailness" bằng <strong>Image Coverage Rate × Average Object
+    Detailness</strong> — về bản chất là <strong>breadth × depth</strong>, đúng hai trục pipeline
+    này đã tự chọn từ đầu. Kết luận: hướng hai-trục hiện tại đã khớp tinh thần nghiên cứu mới
+    nhất; khoảng từ mục tiêu (8-20/30-60/100-200) vẫn là tham số tự hiệu chỉnh bằng dữ liệu thật,
+    không có "con số chuẩn" để tra cứu thay thế.
+  </div>
+
+  <div class="callout">
     <div class="t">Sự cố thực tế: short/medium dài hơn hẳn mục tiêu</div>
     Chạy thử trên dữ liệu server cho thấy prompt <em>short</em> ra tới ~22 từ (mục tiêu 8–20),
     <em>medium</em> có lúc chạm 88 từ (mục tiêu 30–60). Nguyên nhân không phải ở bước 2a mà ở
@@ -493,6 +506,24 @@ long     bề rộng: giữ 4/7 nhóm  (xô nhựa, sọt trái cây bị loại
     tên nhóm không bao giờ vào checklist, dù model viết đúng tên vẫn bị báo "thêm tin". Sửa: nhóm
     văn hoá luôn có tên trong checklist, bất kể đã có mệnh đề khác hay chưa.
   </div>
+
+  <div class="callout">
+    <div class="t">Xung đột thật: luật "PHẢI ĐẦY ĐỦ" (bước 2a) vs ngân sách từ short/medium</div>
+    Sau khi bước 2a được yêu cầu phải nhắc đủ mọi mệnh đề (xem callout tương ứng ở bước 2a), đo
+    lại checklist short trên <code>test_6</code>: tổng số từ cộng dồn của các mệnh đề
+    <strong>p50=19, p90=30, max=44 từ</strong> — trong khi <code>length_hint</code> short chỉ
+    8-20 từ. Ở đuôi phân phối, checklist đòi hỏi nhiều hơn hẳn những gì một câu 20 từ có thể
+    chứa được, bất kể diễn đạt cô đọng cỡ nào — mâu thuẫn trực tiếp với luật "phải nhắc đủ".
+    Nguyên nhân: các trần trước đó (<code>group_element_cap</code>, <code>max_cultural_groups</code>,
+    <code>element_cap</code>) đều giới hạn theo <em>số element/nhóm</em>, chưa có trần trực tiếp
+    theo <em>tổng số từ</em>.
+    <br><br>
+    Sửa: thêm <code>max_checklist_words</code> theo mức (short: 16, medium: 50, long: không giới
+    hạn) — sau khi lắp xong checklist đầy đủ, cắt bớt theo đúng thứ tự ưu tiên GIỮ (mệnh đề nhóm
+    theo salience → dòng "số lượng" → scene), không bao giờ cắt một nhóm xuống dưới 1 mệnh đề (vì
+    2a vẫn thấy tên nhóm đó qua trường "name", nên checklist phải còn ít nhất một mệnh đề tương
+    ứng để không chấm oan). Kết quả đo lại: short p90/max còn đúng 16 từ; medium còn đúng 50 từ.
+  </div>
 </div>
 
 
@@ -643,6 +674,27 @@ long    "Mình muốn ảnh chụp từ trên cao cảnh chợ nổi Cái Răng.
     khớp đúng: "...bông tai vàng bên tai phải" → đạt; "...bên tai trái" → sai vị trí, vẫn tính thiếu;
     không nhắc bên nào cả → thiếu.
   </div>
+</div>
+
+<!-- ---------- STEP 2b2 (đề xuất) ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">2b2</span>
+    <span class="step-title">Sửa lại prompt bị loại <span class="muted" style="font-weight:400">(đề xuất — chưa triển khai)</span></span>
+    <span class="step-note">LLM</span>
+  </div>
+  <div class="io">
+    <div class="in"><div class="lbl">Đầu vào</div>
+      <ul><li>Cặp bị loại + lý do (<code>missing</code>/<code>extra</code> từ 2b)</li></ul></div>
+    <div class="out"><div class="lbl">Đầu ra</div>
+      <ul><li>Cặp đạt (đã sửa) · Cặp thật sự bị loại</li></ul></div>
+  </div>
+  <p>Hiện tại prompt bị 2b loại là <strong>mất trắng</strong>, dù phần lớn lỗi (thiếu 1-2 mệnh đề,
+  thừa 1 chi tiết) hoàn toàn sửa được thay vì phải sinh lại từ đầu. Đề xuất: đưa đúng lý do bị
+  loại (thiếu gì, thừa gì) cho một lượt gọi LLM sửa lại, rồi chấm lại bằng đúng judge của 2b —
+  đạt thì gộp vào tập đạt (đánh dấu <code>corrected: true</code> để biết nguồn gốc), vẫn fail thì
+  mới thật sự loại.</p>
+  <p class="muted">Chưa chốt: số lần retry tối đa trước khi bỏ cuộc. Chưa triển khai code.</p>
 </div>
 
 <!-- ---------- STEP 2c ---------- -->

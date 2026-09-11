@@ -305,6 +305,95 @@ class TestBuildSubJson(unittest.TestCase):
         n_subjects_short = sum(1 for f in short["groups"][0]["facts"] if f.startswith("người "))
         self.assertLess(n_subjects_short, 5)
 
+    def test_checklist_word_count_never_exceeds_level_budget(self):
+        """Chốt chặn cho bug thật (server test_6): checklist short/medium từng đòi
+        hỏi nhiều từ hơn hẳn length_hint cho phép (p90 short cần ~30 từ cho ngân
+        sách 8-20 từ) -- mâu thuẫn trực tiếp với luật 'PHẢI ĐẦY ĐỦ' ở STEP2A_SYSTEM,
+        vì bản thân checklist đưa ra đã không thể nói hết trong khoảng từ cho phép."""
+        target = {
+            "high_level_description": "x",
+            "style_description": {"medium": "photograph",
+                                  "photo": "high-angle wide shot, deep focus",
+                                  "lighting": "bright warm afternoon sunlight"},
+            "compositional_deconstruction": {
+                "background": "Một khung cảnh rất dài dòng nhiều chi tiết mô tả.",
+                "elements": [{"id": i, "type": "obj", "desc": "Vật thể số {}.".format(i)}
+                            for i in range(12)],
+            },
+        }
+        decomp = {
+            "concept_groups": [
+                {"name": "nhóm {}".format(g), "member_ids": [g * 2, g * 2 + 1],
+                 "cardinality": "exact:2", "cultural": (g % 3 == 0)}
+                for g in range(6)
+            ],
+            "facts": {
+                str(i): [
+                    {"rank": 0, "kind": "subject", "text": "vật thể số {} rất dài".format(i)},
+                    {"rank": 1, "kind": "color", "text": "màu sắc đặc trưng số {}".format(i)},
+                    {"rank": 2, "kind": "material", "text": "chất liệu chi tiết số {}".format(i)},
+                ]
+                for i in range(12)
+            },
+        }
+        budgets = {"short": 16, "medium": 50}
+        for level, budget in budgets.items():
+            sub = s1b.build_subjson("x", target, decomp, level, random.Random("s"))
+            n_words = sum(len(c.split()) for c in sub["checklist"])
+            self.assertLessEqual(n_words, budget,
+                                 "{}: checklist {} từ, vượt trần {}".format(
+                                     level, n_words, budget))
+
+    def test_word_budget_trim_keeps_at_least_one_fact_per_group(self):
+        checklist_budget_target = {
+            "high_level_description": "x",
+            "style_description": {"medium": "photograph", "photo": "wide"},
+            "compositional_deconstruction": {"background": "", "elements": [
+                {"id": i, "type": "obj", "desc": "d"} for i in range(6)]},
+        }
+        decomp = {
+            "concept_groups": [
+                {"name": "nhóm {}".format(g), "member_ids": [g], "cardinality": "vague",
+                 "cultural": False}
+                for g in range(6)
+            ],
+            "facts": {str(i): [{"rank": 0, "kind": "subject",
+                                "text": "chủ thể dài dòng nhiều từ số {}".format(i)}]
+                     for i in range(6)},
+        }
+        sub = s1b.build_subjson("x", checklist_budget_target, decomp, "short",
+                                random.Random("s"))
+        for g in sub["groups"]:
+            self.assertGreaterEqual(len(g["facts"]), 1)
+
+    def test_word_budget_trim_keeps_groups_and_scene_in_sync_with_checklist(self):
+        """Sau khi trim, checklist PHẢI khớp đúng với những gì thực sự đưa cho 2a
+        viết (groups[].facts + scene) -- lặp lại việc tách rời hai thứ này chính là
+        bug 'thiếu scene trong checklist' đã sửa trước đó."""
+        target = {
+            "high_level_description": "x",
+            "style_description": {"medium": "photograph",
+                                  "photo": "high-angle wide shot, deep focus",
+                                  "lighting": "bright warm afternoon sunlight"},
+            "compositional_deconstruction": {"background": "", "elements": [
+                {"id": i, "type": "obj", "desc": "d"} for i in range(6)]},
+        }
+        decomp = {
+            "concept_groups": [
+                {"name": "nhóm {}".format(g), "member_ids": [g], "cardinality": "vague",
+                 "cultural": False}
+                for g in range(6)
+            ],
+            "facts": {str(i): [{"rank": 0, "kind": "subject",
+                                "text": "chủ thể dài dòng nhiều từ số {}".format(i)}]
+                     for i in range(6)},
+        }
+        sub = s1b.build_subjson("x", target, decomp, "short", random.Random("s"))
+        flat = [f for g in sub["groups"] for f in g["facts"]]
+        flat += [v for k, v in sub["scene"].items() if v and k != "khong_khi"]
+        self.assertEqual(sorted(flat), sorted(
+            [c for c in sub["checklist"] if not c.startswith("số lượng")]))
+
     def test_too_many_cultural_groups_are_capped_in_short(self):
         """Chốt chặn cho bug thật (server test_3): 4 nhóm cùng cultural=True (vd 4
         món trong 1 mâm cỗ) từng ĐỀU bị ép giữ ở short, phá vỡ ngân sách 8-20 từ."""
