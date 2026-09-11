@@ -34,11 +34,21 @@ from common import io_utils, schema
 STEP = "STEP 1b"
 
 # Cấu hình từng mức: (tỉ lệ nhóm giữ lại), (rank mệnh đề tối đa), (rank cho nhóm chính), (trần element)
+#
+# group_element_cap — trần số element của TỪNG nhóm (main lẫn phụ). Không có trần này,
+#   một nhóm nhiều thành viên (vd "ba người trên thuyền", hay một nhóm văn hoá phụ gộp
+#   4 element) sẽ gộp hết vào short, ra hàng chục mệnh đề cho một mức lẽ ra chỉ 8-20 từ.
+# max_cultural_groups      — trần số nhóm văn hoá được ÉP giữ. Luật "nhóm văn hoá luôn
+#   giữ" không có trần thì một ảnh có 4 nhóm cùng gắn cultural=True (ví dụ 4 món ăn/đồ
+#   vật) sẽ phá vỡ hoàn toàn ngân sách short. Vượt trần thì ưu tiên giữ nhóm đứng trước
+#   (đã xếp theo salience từ bước 1a), phần còn lại vẫn có cơ hội lọt vào ở medium/long.
 LEVEL_CONFIG = {
     "short": {
         "group_ratio": (0.0, 0.0),   # chỉ nhóm số 1 + nhóm bắt buộc
         "max_rank": (1, 1),
         "main_group_max_rank": 1,
+        "group_element_cap": 2,
+        "max_cultural_groups": 2,
         "element_cap": 6,
         "length_hint": "8-20 từ",
         "keep_background": False,
@@ -48,6 +58,8 @@ LEVEL_CONFIG = {
         "group_ratio": (0.40, 0.60),
         "max_rank": (1, 2),
         "main_group_max_rank": 3,
+        "group_element_cap": 4,
+        "max_cultural_groups": 3,
         "element_cap": 10,
         "length_hint": "30-60 từ",
         "keep_background": "short",
@@ -57,6 +69,8 @@ LEVEL_CONFIG = {
         "group_ratio": (0.55, 0.95),
         "max_rank": (2, 3),
         "main_group_max_rank": 8,
+        "group_element_cap": None,        # không giới hạn riêng, dùng element_cap chung
+        "max_cultural_groups": None,      # không giới hạn
         "element_cap": 24,
         "length_hint": "100-200 từ",
         "keep_background": True,
@@ -126,13 +140,20 @@ def select_groups(
     level: str,
     rng: random.Random,
     text_element_ids: set,
-) -> Tuple[List[Dict[str, Any]], float]:
+) -> Tuple[List[Dict[str, Any]], float, set]:
     """Trục BỀ RỘNG — chọn nhóm khái niệm nào được giữ.
 
     Luật cứng: nhóm mang yếu tố văn hoá Việt và nhóm chứa chữ-trong-ảnh luôn được giữ.
+
+    Trả thêm `text_forced_ids`: id() của các nhóm được giữ CHỈ VÌ chứa chữ-trong-ảnh
+    (không phải nhóm chính, không phải nhóm văn hoá, không nằm trong ngân sách bề
+    rộng bình thường). 1a hay gom một nhóm "cảnh nền" lớn (chục element không liên
+    quan) mà tình cờ chứa 1 element chữ — nếu giữ nguyên cả nhóm thì short/medium sẽ
+    phình to dù chỉ cần đúng element chữ đó. build_subjson dùng tập này để CHỈ giữ
+    phần tử chữ, bỏ qua phần còn lại của nhóm catch-all.
     """
     if not groups:
-        return [], 1.0
+        return [], 1.0, set()
 
     cfg = LEVEL_CONFIG[level]
     lo, hi = cfg["group_ratio"]
@@ -141,24 +162,37 @@ def select_groups(
     n_total = len(groups)
     n_keep = max(1, int(round(ratio * n_total)))
 
-    kept_indices = set()
-    # Nhóm số 0 (quan trọng nhất) luôn giữ.
-    kept_indices.add(0)
+    # Ngân sách bề rộng "bình thường": nhóm chính + nhóm văn hoá (có trần) + lấp đầy.
+    # Vượt trần thì ưu tiên nhóm đứng trước (đã xếp theo salience) -- phần còn lại
+    # vẫn có cơ hội lọt vào ở mức nén nhẹ hơn (medium/long không có trần này).
+    max_cultural = cfg.get("max_cultural_groups")
+    base_kept = {0}
+    n_cultural_kept = 0
     for i, group in enumerate(groups):
-        if group.get("cultural"):
-            kept_indices.add(i)
-        if text_element_ids and set(group.get("member_ids", [])) & text_element_ids:
-            kept_indices.add(i)
-
-    # Bổ sung theo thứ tự quan trọng cho đủ n_keep.
+        if i == 0 or not group.get("cultural"):
+            continue  # nhóm chính đã chắc chắn được giữ, không tính vào trần văn hoá
+        if max_cultural is not None and n_cultural_kept >= max_cultural:
+            continue
+        base_kept.add(i)
+        n_cultural_kept += 1
     for i in range(n_total):
-        if len(kept_indices) >= n_keep:
+        if len(base_kept) >= n_keep:
             break
-        kept_indices.add(i)
+        base_kept.add(i)
+
+    kept_indices = set(base_kept)
+    text_forced_ids: set = set()
+    if text_element_ids:
+        for i, group in enumerate(groups):
+            if i in kept_indices:
+                continue
+            if set(group.get("member_ids", [])) & text_element_ids:
+                kept_indices.add(i)
+                text_forced_ids.add(id(group))
 
     selected = [groups[i] for i in sorted(kept_indices)]
     breadth_drop = 1.0 - (len(selected) / n_total)
-    return selected, breadth_drop
+    return selected, breadth_drop, text_forced_ids
 
 
 def select_facts(
@@ -190,7 +224,9 @@ def build_subjson(
         el.get("id") for el in schema.elements_of(target) if el.get("type") == "text"
     }
 
-    selected_groups, breadth_drop = select_groups(groups, level, rng, text_element_ids)
+    selected_groups, breadth_drop, text_forced_ids = select_groups(
+        groups, level, rng, text_element_ids,
+    )
     if not selected_groups:
         return None
 
@@ -209,6 +245,23 @@ def build_subjson(
         max_rank = cfg["main_group_max_rank"] if is_main else rng.randint(lo_rank, hi_rank)
 
         member_ids = group.get("member_ids", []) or []
+
+        # Nhóm này được giữ CHỈ VÌ chứa 1 element chữ (không phải nhóm chính/văn hoá,
+        # không nằm trong ngân sách bề rộng bình thường) -- thường là một nhóm
+        # "cảnh nền" gộp chục element không liên quan. Chỉ giữ đúng (các) element
+        # chữ, bỏ qua phần còn lại, để không kéo cả đống nội dung phụ vào short/medium.
+        if id(group) in text_forced_ids:
+            member_ids = [m for m in member_ids if m in text_element_ids]
+
+        # Trần số element cho TỪNG nhóm (main lẫn phụ). Không có trần này, một nhóm
+        # nhiều thành viên (vd "ba người trên thuyền", hay một nhóm văn hoá phụ gộp
+        # 4 element) sẽ gộp hết vào short, ra hàng chục mệnh đề cho một mức lẽ ra chỉ
+        # 8-20 từ. Nhóm chính được giữ nhiều hơn 1 chút vì nó là chủ thể quan trọng nhất.
+        group_cap = cfg.get("group_element_cap")
+        if group_cap is not None:
+            cap = group_cap + 1 if is_main else group_cap
+            member_ids = member_ids[:cap]
+
         group_facts: List[str] = []
 
         # KHÔNG dedup theo chữ trên toàn nhóm. Hai thành viên khác nhau (2 phụ nữ,

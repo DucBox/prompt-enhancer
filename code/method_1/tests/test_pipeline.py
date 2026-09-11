@@ -201,6 +201,44 @@ class TestBuildSubJson(unittest.TestCase):
         self.assertNotIn("boi_canh", self.build("short")["scene"])
         self.assertIn("boi_canh", self.build("long")["scene"])
 
+    def test_catchall_group_with_one_text_element_is_trimmed_to_that_element(self):
+        """Chốt chặn cho bug thật (server test_3): 'cảnh nền' gom 13 element không
+        liên quan, tình cờ chứa 1 element chữ (biển hiệu) -- giữ nguyên CẢ nhóm chỉ
+        vì có chữ khiến short/medium phình to. Phải CHỈ giữ đúng element chữ đó."""
+        target = {
+            "high_level_description": "Một cảnh chợ.",
+            "style_description": {"medium": "photograph", "photo": "wide"},
+            "compositional_deconstruction": {
+                "background": "Chợ.",
+                "elements": (
+                    [{"id": 0, "type": "obj", "desc": "Chủ thể chính."}]
+                    + [{"id": i, "type": "obj", "desc": "Vật nền {}.".format(i)}
+                      for i in range(1, 6)]
+                    + [{"id": 6, "type": "text", "text": "ABC", "desc": "Biển hiệu chữ ABC."}]
+                ),
+            },
+        }
+        decomp = {
+            "concept_groups": [
+                {"name": "chủ thể chính", "member_ids": [0], "cardinality": "exact:1", "cultural": False},
+                {"name": "cảnh nền", "member_ids": [1, 2, 3, 4, 5, 6], "cardinality": "vague", "cultural": False},
+            ],
+            "facts": {
+                "0": [{"rank": 0, "kind": "subject", "text": "chủ thể chính"}],
+                **{str(i): [{"rank": 0, "kind": "subject", "text": "vật nền {}".format(i)},
+                           {"rank": 1, "kind": "attribute", "text": "chi tiết {}".format(i)}]
+                  for i in range(1, 6)},
+                "6": [{"rank": 0, "kind": "subject", "text": "biển hiệu ABC"},
+                      {"rank": 1, "kind": "color", "text": "chữ đen"}],
+            },
+        }
+        sub = s1b.build_subjson("x", target, decomp, "short", random.Random("s"))
+        bg = next(g for g in sub["groups"] if g["name"] == "cảnh nền")
+        self.assertIn("biển hiệu ABC", bg["facts"])
+        for i in range(1, 6):
+            self.assertNotIn("vật nền {}".format(i), bg["facts"],
+                             "kéo theo vật nền không liên quan chỉ vì nhóm có chữ")
+
     def test_exact_cardinality_emits_count_constraint(self):
         checklist = self.build("long")["checklist"]
         self.assertTrue(any(c.startswith("số lượng: 3") for c in checklist))
@@ -211,6 +249,59 @@ class TestBuildSubJson(unittest.TestCase):
             for c in self.build(level)["checklist"]:
                 self.assertNotIn("cảnh nền", c.replace("số lượng: ", "")) if c.startswith(
                     "số lượng:") else None
+
+    def test_group_with_many_members_is_capped_in_short(self):
+        """Chốt chặn cho bug thật (server test_3): nhóm chính nhiều thành viên
+        (vd '3 người trên thuyền') từng gộp hết vào short, ra hàng chục mệnh đề
+        cho một mức lẽ ra chỉ 8-20 từ."""
+        target = {
+            "high_level_description": "Năm người bạn.",
+            "style_description": {"medium": "photograph", "photo": "wide"},
+            "compositional_deconstruction": {
+                "background": "Nền.",
+                "elements": [{"id": i, "type": "obj", "desc": "Người thứ {}.".format(i)}
+                            for i in range(5)],
+            },
+        }
+        decomp = {
+            "concept_groups": [{"name": "nhóm bạn", "member_ids": [0, 1, 2, 3, 4],
+                                "cardinality": "exact:5", "cultural": False}],
+            "facts": {str(i): [{"rank": 0, "kind": "subject", "text": "người {}".format(i)},
+                               {"rank": 1, "kind": "attribute", "text": "đặc điểm {}".format(i)}]
+                     for i in range(5)},
+        }
+        short = s1b.build_subjson("x", target, decomp, "short", random.Random("s"))
+        long_ = s1b.build_subjson("x", target, decomp, "long", random.Random("s"))
+        self.assertLess(len(short["groups"][0]["facts"]), len(long_["groups"][0]["facts"]))
+        # short chỉ được giữ vài người, không phải cả 5
+        n_subjects_short = sum(1 for f in short["groups"][0]["facts"] if f.startswith("người "))
+        self.assertLess(n_subjects_short, 5)
+
+    def test_too_many_cultural_groups_are_capped_in_short(self):
+        """Chốt chặn cho bug thật (server test_3): 4 nhóm cùng cultural=True (vd 4
+        món trong 1 mâm cỗ) từng ĐỀU bị ép giữ ở short, phá vỡ ngân sách 8-20 từ."""
+        target = {
+            "high_level_description": "Mâm cỗ.",
+            "style_description": {"medium": "photograph", "photo": "wide"},
+            "compositional_deconstruction": {
+                "background": "Bàn gỗ.",
+                "elements": [{"id": i, "type": "obj", "desc": "Món {}.".format(i)}
+                            for i in range(4)],
+            },
+        }
+        decomp = {
+            "concept_groups": [
+                {"name": "món {}".format(i), "member_ids": [i],
+                 "cardinality": "exact:1", "cultural": True}
+                for i in range(4)
+            ],
+            "facts": {str(i): [{"rank": 0, "kind": "subject", "text": "món {}".format(i)}]
+                     for i in range(4)},
+        }
+        short = s1b.build_subjson("x", target, decomp, "short", random.Random("s"))
+        long_ = s1b.build_subjson("x", target, decomp, "long", random.Random("s"))
+        self.assertLess(len(short["groups"]), 4, "vẫn giữ cả 4 nhóm cultural ở short")
+        self.assertEqual(len(long_["groups"]), 4, "long không nên bị giới hạn số nhóm cultural")
 
     def test_depth_axis_actually_cuts_facts(self):
         """Chốt chặn cho lỗi thiết kế cũ: chỉ cắt bề rộng là chưa đủ."""
