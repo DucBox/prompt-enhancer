@@ -1,0 +1,17 @@
+# Dữ liệu gốc & đầu ra pipeline — không đẩy lên GitHub
+/data/
+**/output/
+
+# Bí mật
+.env
+.env.local
+**/.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+.DS_Store

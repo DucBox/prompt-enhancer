@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>Prompt Enhancer — Kế hoạch triển khai</title>
+<style>
+  @page { size: A4; margin: 16mm 14mm 14mm 14mm; }
+
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 10.2pt; line-height: 1.5; color: #1a1d21; margin: 0;
+  }
+  code, pre { font-family: "SF Mono", Menlo, Consolas, monospace; }
+
+  h1 { font-size: 21pt; margin: 0 0 2mm; letter-spacing: -0.4px; }
+  .sub { color: #5b636e; font-size: 10pt; margin: 0 0 7mm; }
+
+  h2 {
+    font-size: 13pt; margin: 0 0 3mm; padding-bottom: 1.8mm;
+    border-bottom: 2px solid #1a1d21;
+  }
+  h3 { font-size: 10.6pt; margin: 5mm 0 2mm; }
+
+  .step { margin-bottom: 7mm; }
+  .step-head {
+    display: flex; align-items: baseline; gap: 3mm;
+    border-bottom: 1.5px solid #1a1d21; padding-bottom: 1.8mm; margin-bottom: 3mm;
+    page-break-after: avoid; break-after: avoid; page-break-inside: avoid;
+  }
+  .io, pre, table, h3 { page-break-inside: avoid; }
+  .num {
+    font-size: 15pt; font-weight: 700; color: #b8341f;
+    min-width: 13mm; letter-spacing: -0.5px;
+  }
+  .step-title { font-size: 12.5pt; font-weight: 700; }
+  .step-note { margin-left: auto; font-size: 8.6pt; color: #6b7280; font-style: italic; }
+
+  .io { display: flex; gap: 4mm; margin: 3mm 0; }
+  .io > div {
+    flex: 1; border: 1px solid #d4d8dd; border-radius: 3px;
+    padding: 2.5mm 3mm; background: #fbfcfd;
+  }
+  .io .lbl {
+    font-size: 7.6pt; font-weight: 700; letter-spacing: 0.9px;
+    text-transform: uppercase; color: #6b7280; margin-bottom: 1.5mm;
+  }
+  .io .in  { border-left: 3px solid #7a8694; }
+  .io .out { border-left: 3px solid #b8341f; }
+  .io ul { margin: 0; padding-left: 4.5mm; }
+  .io li { margin-bottom: 0.8mm; }
+
+  pre {
+    background: #f4f6f8; border: 1px solid #e0e4e9; border-radius: 3px;
+    padding: 2.5mm 3mm; font-size: 8.4pt; line-height: 1.45;
+    overflow-x: auto; white-space: pre-wrap; margin: 2mm 0;
+  }
+  .ex-lbl {
+    font-size: 8.4pt; font-weight: 700; color: #b8341f;
+    text-transform: uppercase; letter-spacing: 0.6px; margin-top: 3mm;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 9.2pt; margin: 2.5mm 0; }
+  th {
+    text-align: left; background: #1a1d21; color: #fff;
+    padding: 1.8mm 2.5mm; font-size: 8.6pt; letter-spacing: 0.3px;
+  }
+  td { padding: 1.8mm 2.5mm; border-bottom: 1px solid #e0e4e9; vertical-align: top; }
+  tr:nth-child(even) td { background: #fafbfc; }
+
+  .callout {
+    border-left: 3px solid #b8341f; background: #fdf5f3;
+    padding: 3mm 3.5mm; margin: 3.5mm 0; page-break-inside: avoid;
+  }
+  .callout .t { font-weight: 700; margin-bottom: 1.5mm; }
+
+  .flow {
+    background: #f4f6f8; border: 1px solid #e0e4e9; border-radius: 3px;
+    padding: 4mm; font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 8.6pt; line-height: 1.62; margin: 4mm 0; white-space: pre;
+    page-break-inside: avoid;
+  }
+  .pagebreak { page-break-before: always; }
+  .muted { color: #6b7280; }
+  strong.k { color: #b8341f; }
+  footer { margin-top: 8mm; padding-top: 2.5mm; border-top: 1px solid #d4d8dd;
+           font-size: 8.4pt; color: #6b7280; }
+</style>
+</head>
+<body>
+
+<h1>Prompt Enhancer — Kế hoạch triển khai</h1>
+<p class="sub">
+  Mô-đun trung gian: <strong>user prompt → JSON chi tiết</strong> làm đầu vào cho model sinh ảnh.
+  Giai đoạn 1 chỉ làm SFT; DPO/GRPO để sau.
+</p>
+
+<h2>Bối cảnh &amp; nguyên tắc cốt lõi</h2>
+
+<p>
+Model sinh ảnh chỉ chạy tốt khi nhận JSON <em>chi tiết và đầy đủ</em>. Nên mô-đun này không chỉ
+"đổi định dạng" mà phải <strong>chi tiết hoá</strong>: dù đầu vào ngắn hay dài, đầu ra luôn phải là
+một JSON dày.
+</p>
+
+<p>
+Ta có sẵn <strong>28.000 file JSON</strong> (vốn là caption của ảnh thật) nhưng
+<strong>chưa có user prompt</strong>. Toàn bộ kế hoạch dưới đây là để sinh ra phần thiếu đó,
+theo hướng đi ngược: <span class="muted">JSON → prompt</span>, rồi train theo chiều xuôi
+<span class="muted">prompt → JSON</span>.
+</p>
+
+<div class="callout">
+  <div class="t">Ba khái niệm dùng xuyên suốt tài liệu</div>
+  <table style="margin:0">
+    <tr>
+      <td style="width:26mm"><code>target_json</code></td>
+      <td>JSON gốc, đầy đủ. <strong class="k">Luôn là nhãn Y khi huấn luyện</strong>, cho cả 3 mức prompt.</td>
+    </tr>
+    <tr>
+      <td><code>sub_json</code></td>
+      <td>Phần thông tin mà user "được biết" — một tập con các <em>mệnh đề</em> rút từ
+          <code>target_json</code>. Dùng để sinh prompt và làm <strong>checklist chấm điểm</strong>.
+          Không bao giờ là nhãn Y.</td>
+    </tr>
+    <tr>
+      <td><code>persona</code></td>
+      <td>Hồ sơ người viết (vai, ngôn ngữ, độ cẩu thả). Chỉ đổi <em>văn phong</em>, không đổi nội dung.</td>
+    </tr>
+  </table>
+</div>
+
+<h3>Ví dụ chạy xuyên suốt</h3>
+<p>Giả sử một file trong 28k có nội dung rút gọn như sau:</p>
+
+<pre>target_json = {
+  "high_level_description": "Ảnh chụp ba người bạn trẻ đứng trước Lăng Chủ tịch Hồ Chí Minh ...",
+  "style_description": { "aesthetics": "...", "lighting": "nắng sớm", "photo": "...", "medium": "photograph" },
+  "compositional_deconstruction": {
+    "background": "Quảng trường Ba Đình rộng, bầu trời trong ...",
+    "elements": [
+      { "id": 0, "type": "obj", "desc": "Nam thanh niên mặc áo sơ mi trắng ..." },
+      { "id": 1, "type": "obj", "desc": "Nam thanh niên mặc áo phông đen ..." },
+      { "id": 2, "type": "obj", "desc": "Cô gái mặc áo dài trắng ..." },
+      { "id": 3, "type": "obj", "desc": "Lăng Chủ tịch Hồ Chí Minh, khối đá granite xám ..." },
+      { "id": 4, "type": "obj", "desc": "Hàng cây xanh hai bên quảng trường ..." },
+      { "id": 5, "type": "obj", "desc": "Lá cờ đỏ sao vàng trên cột cờ phía xa ..." }
+    ]
+  }
+}</pre>
+
+<div class="flow">Toàn bộ pipeline
+
+  28k target_json
+        │
+        ├─▶ [0] Chuẩn hoá + audit ──────────▶ target_json sạch, có element id
+        │
+        ├─▶ [1a] LLM nhóm + phân rã ────────▶ nhóm khái niệm + mệnh đề  (cache, đóng băng)
+        │
+        ├─▶ [1b] CODE nén 2 trục ───────────▶ sub_json theo 3 mức chi tiết
+        │
+        ├─▶ [2a] LLM verbalize ─────────────▶ user_prompt
+        │
+        ├─▶ [2b] Lọc / QC ──────────────────▶ loại prompt sai lệch (~15-20%)
+        │
+        ├─▶ [2c] Chia tập theo id ──────────▶ train / val / test
+        │
+        ├─▶ [3]  Bộ đánh giá + baseline ────▶ thước đo (làm TRƯỚC khi train)
+        │
+        ├─▶ [4]  Huấn luyện SFT ────────────▶ LoRA adapter
+        │
+        └─▶ [5]  Đánh giá ──────────────────▶ báo cáo</div>
+
+<h2 style="margin-top:7mm">Chi tiết từng bước</h2>
+
+<!-- ---------- STEP 0 ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">0</span>
+    <span class="step-title">Chuẩn hoá &amp; kiểm định dữ liệu gốc</span>
+    <span class="step-note">code thuần</span>
+  </div>
+
+  <div class="io">
+    <div class="in">
+      <div class="lbl">Đầu vào</div>
+      <ul><li>28.000 file <code>.txt</code> (lõi là JSON)</li></ul>
+    </div>
+    <div class="out">
+      <div class="lbl">Đầu ra</div>
+      <ul>
+        <li><code>target_json</code> đã sạch, mỗi element có <code>id</code></li>
+        <li>Báo cáo audit</li>
+      </ul>
+    </div>
+  </div>
+
+  <p><strong>Làm gì:</strong> bỏ <code>bbox</code> và <code>color_palette</code>; kiểm tra schema
+  (<code>photo</code> hoặc <code>art_style</code>, không được cả hai); gán <code>id</code> ổn định
+  cho từng element; thống kê phân phối số element, độ dài, tỉ lệ lỗi, trùng lặp.</p>
+
+  <p><strong>Vì sao quan trọng:</strong> phân phối số element thu được ở đây chính là
+  <em>ngưỡng tham chiếu</em> cho chỉ số Richness ở bước 5. Và nếu dữ liệu gốc bẩn thì mọi bước sau vô nghĩa.</p>
+
+  <div class="ex-lbl">Kết quả đo thử trên 1.000 mẫu</div>
+<pre>1000/1000 file hợp lệ, 0 lỗi schema        7.831 element
+
+                      p50    p90    max    trung bình
+elements / ảnh          7     14     24        7,8
+từ / desc              18     27     95       19,1   ← xem bước 1b
+từ / background        26     42    109       27,1
+từ / high_level_desc   28     37     59       29,1
+
+element type=="text":  31/7831 = 0,4%  (hiếm hơn dự kiến)</pre>
+
+  <p><span class="muted">Dữ liệu gốc rất sạch. Con số đáng chú ý là
+  <strong>mỗi <code>desc</code> dài trung bình 19 từ</strong> — nó quyết định thiết kế của bước 1b.</span></p>
+</div>
+
+<!-- ---------- STEP 1a ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">1a</span>
+    <span class="step-title">LLM gom nhóm &amp; phân rã mệnh đề</span>
+    <span class="step-note">LLM · chạy 1 lần · cache</span>
+  </div>
+
+  <div class="io">
+    <div class="in">
+      <div class="lbl">Đầu vào</div>
+      <ul><li>1 <code>target_json</code></li></ul>
+    </div>
+    <div class="out">
+      <div class="lbl">Đầu ra</div>
+      <ul>
+        <li>Nhóm khái niệm + số lượng <span class="muted">(bề rộng)</span></li>
+        <li>Mệnh đề nguyên tử của từng <code>desc</code> <span class="muted">(chiều sâu)</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <p><strong>Nhiệm vụ 1 — gom nhóm.</strong> Một prompt ngắn có thể nhắc tới <em>một khái niệm</em>
+  nhưng khái niệm đó lại tương ứng với <em>nhiều element</em>. "Nhóm bạn 2 nam 1 nữ" = 1 khái niệm
+  nhưng 3 element. Nếu chỉ đếm element sẽ cắt nhầm.</p>
+
+<pre>{
+  "concept_groups": [
+    { "name": "Lăng Bác",   "member_ids": [3],     "cardinality": "exact:1", "cultural": true },
+    { "name": "nhóm bạn",   "member_ids": [0,1,2], "cardinality": "exact:3",
+      "cardinality_detail": "2 nam, 1 nữ" },
+    { "name": "cảnh nền",   "member_ids": [4,5],   "cardinality": "vague" }
+  ]
+}</pre>
+
+  <p><span class="muted"><code>cardinality</code> có hai trạng thái — <code>exact:n</code> khi đếm được
+  chính xác, <code>vague</code> khi mô tả kiểu "nhiều", "một đám". Nhầm chỗ này sẽ sinh ra ràng buộc
+  số lượng sai.</span></p>
+
+  <p><strong>Nhiệm vụ 2 — phân rã mệnh đề.</strong> Mỗi <code>desc</code> dài trung bình 19 từ và
+  gói nhiều thông tin vào một câu. Phải tách thành các mệnh đề nhỏ nhất, có xếp hạng, thì mới
+  cắt bớt chiều sâu được ở bước sau.</p>
+
+  <div class="ex-lbl">Ví dụ — phân rã một desc có thật</div>
+<pre>desc gốc (24 từ):
+  "A long purple wooden boat positioned horizontally across the center of the frame,
+   serving as a floating restaurant with cooking equipment and passengers aboard."
+
+→ f0  chủ thể : chiếc thuyền        (hạng 0 — luôn giữ)
+  f1  thuộc tính: màu tím            (hạng 1)
+  f2  thuộc tính: bằng gỗ            (hạng 2)
+  f3  thuộc tính: là quán ăn nổi     (hạng 3)
+  f4  thuộc tính: dài                (hạng 4)
+  f5  vị trí   : nằm ngang giữa khung (hạng 5)
+  f6  thuộc tính: có khách trên thuyền (hạng 6)</pre>
+
+  <p><span class="muted">Tập mệnh đề còn sống sót sau khi cắt chính là
+  <strong>checklist chấm điểm</strong> ở bước 5 — nên đơn vị chấm điểm là <em>mệnh đề</em>,
+  không phải cả <code>desc</code>.</span></p>
+</div>
+
+<!-- ---------- STEP 1b ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">1b</span>
+    <span class="step-title">Lắp <code>sub_json</code> — nén theo 2 trục</span>
+    <span class="step-note">code thuần · có seed</span>
+  </div>
+
+  <div class="io">
+    <div class="in">
+      <div class="lbl">Đầu vào</div>
+      <ul><li><code>target_json</code> + kết quả bước 1a</li></ul>
+    </div>
+    <div class="out">
+      <div class="lbl">Đầu ra</div>
+      <ul><li>3 <code>sub_json</code> (short / medium / long)</li></ul>
+    </div>
+  </div>
+
+  <div class="callout">
+    <div class="t">Phải nén cả hai trục, không chỉ một</div>
+    Chỉ cắt bớt số lượng element là <strong>chưa đủ</strong>. Vì mỗi <code>desc</code> dài trung bình
+    19 từ, một prompt "short" giữ 2 element vẫn ra ~38 từ — đặc như JSON, không giống người viết.
+    <br><br>
+    <strong>Trục bề rộng</strong> — giữ bao nhiêu nhóm khái niệm.<br>
+    <strong>Trục chiều sâu</strong> — mỗi element giữ bao nhiêu mệnh đề.
+  </div>
+
+  <table>
+    <tr><th style="width:20mm">Mức</th><th style="width:46mm">Bề rộng</th><th>Chiều sâu</th>
+        <th style="width:24mm">Độ dài</th></tr>
+    <tr><td><strong>short</strong></td>
+        <td>Nhóm chính + mọi nhóm văn hoá Việt + mọi chữ trong ảnh</td>
+        <td>Chỉ chủ thể + 1 thuộc tính <span class="muted">(f0–f1)</span></td>
+        <td>8–20 từ</td></tr>
+    <tr><td><strong>medium</strong></td>
+        <td>40–60% số nhóm, thêm gợi ý bối cảnh</td>
+        <td>1–2 thuộc tính mỗi element</td>
+        <td>30–60 từ</td></tr>
+    <tr><td><strong>long</strong></td>
+        <td>55–95% số nhóm <span class="muted">(ngẫu nhiên)</span></td>
+        <td>2–3 thuộc tính; riêng chủ thể chính giữ gần đủ</td>
+        <td>100–200 từ</td></tr>
+  </table>
+
+  <p><span class="muted">Đuôi 95% của mức <em>long</em> chính là tình huống user viết cực chi tiết —
+  khi đó việc của model gần như chỉ là bóc tách và dựng lại JSON. Đây là một điểm trên phổ,
+  không phải một chế độ riêng.</span></p>
+
+  <div class="ex-lbl">Ví dụ — cùng một ảnh, hai mức nén</div>
+<pre>Ảnh gốc: chợ nổi Cái Răng — 7 element, trong đó có cả một
+         element 17 từ tả "cái xô nhựa đỏ trên boong thuyền"
+
+short    bề rộng: giữ 1 nhóm "thuyền" + nhóm văn hoá "Chợ nổi Cái Răng"
+         chiều sâu: f0-f1
+         → checklist chỉ có 3 mệnh đề: chợ nổi Cái Răng · thuyền gỗ · chụp từ trên cao
+
+long     bề rộng: giữ 4/7 nhóm  (xô nhựa, sọt trái cây bị loại)
+         chiều sâu: f0-f3
+         → checklist ~14 mệnh đề</pre>
+
+  <div class="callout">
+    <div class="t">Hệ quả: đơn vị chấm điểm là mệnh đề</div>
+    Vì chiều sâu bị cắt nên <code>desc</code> không còn nguyên văn. Thay vì hỏi
+    <em>"element e0 có xuất hiện không"</em>, ta hỏi từng mệnh đề một:
+    <em>"có thuyền không? · có màu tím không?"</em>
+    <br><br>
+    Ở mức short, checklist chỉ có "thuyền gỗ" — nên model tự thêm "quán ăn nổi, có người
+    đội nón lá đang nấu" <strong>không bị trừ điểm</strong>, ngược lại còn được tính vào
+    chỉ số Độ dày.
+  </div>
+</div>
+
+
+<!-- ---------- STEP 2a ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">2a</span>
+    <span class="step-title">Sinh user prompt</span>
+    <span class="step-note">LLM</span>
+  </div>
+
+  <div class="io">
+    <div class="in">
+      <div class="lbl">Đầu vào</div>
+      <ul><li><code>sub_json</code> + <code>persona</code></li></ul>
+    </div>
+    <div class="out">
+      <div class="lbl">Đầu ra</div>
+      <ul><li><code>user_prompt</code> (văn xuôi tự nhiên)</li></ul>
+    </div>
+  </div>
+
+  <div class="callout">
+    <div class="t">Rủi ro lớn nhất của bước này</div>
+    Nếu chỉ bảo LLM "viết prompt từ bản mô tả này", nó sẽ cho ra một bản
+    <strong>dịch xuôi của JSON</strong> — liệt kê từng vật thể, dùng ngôn ngữ khung hình
+    ("nằm ở góc trên bên trái"), bám đúng thứ tự JSON. Đó không phải giọng người dùng.
+    System prompt phải chặn đúng các hành vi đó.
+  </div>
+
+  <h3>System prompt</h3>
+<pre>Bạn đang đóng vai NGƯỜI DÙNG muốn nhờ AI tạo một tấm ảnh.
+Bạn được cho một bản mô tả có cấu trúc. Hãy viết ra CÂU YÊU CẦU của bạn.
+
+BẮT BUỘC
+- Viết như người ĐANG ĐẶT HÀNG một bức ảnh chưa tồn tại,
+  KHÔNG phải người đang mô tả một bức ảnh có sẵn.
+- Chỉ nói những gì có trong bản mô tả. Cấm thêm thông tin mới.
+- Giữ NGUYÊN VĂN thuật ngữ tiếng Việt (áo dài, bánh tét, chợ nổi Cái Răng...).
+- Độ dài: {8-20 | 30-60 | 100-200} từ.
+
+CẤM
+- Cấm liệt kê từng vật thể thành từng mệnh đề riêng.
+  Gộp vật cùng loại: "ba chiếc thuyền gỗ", "mấy người đội nón lá".
+- Cấm ngôn ngữ kỹ thuật về khung hình: "nằm ở góc trên bên trái",
+  "chiếm phần dưới khung hình", "ở tiền cảnh".
+  User thật nói "phía sau", "bên cạnh", "ở giữa".
+- Cấm bám theo thứ tự bản mô tả. Bắt đầu bằng thứ bạn quan tâm nhất.
+- Cấm văn dịch. Viết như người Việt nói chuyện.
+- Cấm lặp một khuôn mở đầu; đa dạng cách vào câu.
+
+PERSONA: {vai} · {giọng} · {ngôn ngữ} · {độ cẩu thả}</pre>
+
+  <p>Kèm <strong>3–5 ví dụ few-shot viết tay</strong>. Với nhiệm vụ bắt chước văn phong,
+  few-shot hiệu quả hơn hẳn mô tả bằng luật.</p>
+
+  <h3>Persona điều khiển những gì</h3>
+  <table>
+    <tr><th style="width:26mm">Trục</th><th>Giá trị</th></tr>
+    <tr><td>Vai</td><td><strong>60% user phổ thông</strong> · 40% còn lại chia đều: designer · khách ngành cưới–sự kiện · sinh viên · marketing</td></tr>
+    <tr><td>Ngôn ngữ</td><td>80% tiếng Việt · 20% tiếng Anh nhưng giữ nguyên thuật ngữ Việt (áo dài, khăn xếp…)</td></tr>
+    <tr><td>Giọng</td><td>mô tả trung tính · ra lệnh · kể lể lan man</td></tr>
+  </table>
+
+  <p><span class="muted">Persona chỉ đổi cách viết, không đổi nội dung — nên cùng một
+  <code>sub_json</code> với 5 persona khác nhau sẽ cho 5 prompt khác nhau nhưng
+  <strong>chung một thước đo chấm điểm</strong>.</span></p>
+
+  <div class="ex-lbl">Ví dụ — trên ảnh chợ nổi Cái Răng có thật (7 element)</div>
+<pre>short   "Ảnh chụp từ trên cao chợ nổi Cái Răng với mấy chiếc thuyền gỗ"     (13 từ)
+
+medium  "Chụp từ flycam chợ nổi Cái Răng trên sông nước đục, ba chiếc thuyền
+         gỗ neo gần nhau, một chiếc màu tím bán đồ ăn, mấy người đội nón lá
+         đang nấu nướng."                                                   (36 từ)
+
+long    "Mình muốn ảnh chụp từ trên cao cảnh chợ nổi Cái Răng. Mặt sông rộng
+         màu nâu đục chiếm gần hết khung hình. Ở giữa là chiếc thuyền gỗ dài
+         màu tím làm quán ăn nổi, có người đội nón lá đang nấu. Bên trên là
+         thuyền chở đầy sọt trái cây, phía dưới là chiếc thuyền xanh chở
+         khách ngồi thành hàng."                                            (68 từ)
+</pre>
+
+  <p><strong>Ba hành vi người thật, đọc ra được từ chính ví dụ trên:</strong></p>
+  <table>
+    <tr><th style="width:34mm">Hành vi</th><th>Trong ví dụ</th></tr>
+    <tr><td>Gộp, không liệt kê</td>
+        <td>"ba chiếc thuyền gỗ" — JSON tả riêng từng chiếc thành 3 element</td></tr>
+    <tr><td>Bỏ hẳn đồ vặt</td>
+        <td>Cái xô nhựa đỏ (element 17 từ) không xuất hiện ở bất kỳ mức nào, kể cả long</td></tr>
+    <tr><td>Đảo thứ tự tự nhiên</td>
+        <td>Chủ thể → bối cảnh → không khí. JSON thì background trước, element thứ tự ngẫu nhiên</td></tr>
+  </table>
+
+  <div class="callout">
+    <div class="t">Ngoài phạm vi: lỗi chính tả</div>
+    Mọi prompt sinh ra ở bước này đều <strong>viết đúng chính tả, đủ dấu</strong>. Việc chịu được
+    đầu vào sai chính tả, mất dấu hay viết tắt (<em>"chup anh nhom ban truoc lang bac"</em>)
+    thuộc về một <strong>mô-đun correction riêng</strong>, đặt <em>trước</em> prompt enhancer
+    trong chuỗi xử lý.
+    <br><br>
+    Lý do tách ra: nhiệm vụ chính của mô-đun này là <em>chi tiết hoá</em>. Trộn thêm nhiễu chính tả
+    vào dữ liệu huấn luyện sẽ bắt model học hai việc cùng lúc, làm nhoè cả hai và khiến
+    phần đánh giá khó quy trách nhiệm khi có lỗi.
+  </div>
+
+  <p><strong>Kiểm soát chất lượng:</strong> chạy thử 50 mẫu và tự đọc trước khi đốt 56k lượt gọi.
+  Nếu thấy nhiều câu kiểu <em>"một chiếc thuyền gỗ dài màu tím được đặt nằm ngang ở trung tâm
+  khung hình"</em> thì system prompt còn hở — sửa rồi mới chạy tiếp.</p>
+</div>
+
+<!-- ---------- STEP 2b ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">2b</span>
+    <span class="step-title">Lọc chất lượng</span>
+    <span class="step-note">LLM khác họ</span>
+  </div>
+  <div class="io">
+    <div class="in"><div class="lbl">Đầu vào</div>
+      <ul><li>cặp (<code>sub_json</code>, <code>user_prompt</code>)</li></ul></div>
+    <div class="out"><div class="lbl">Đầu ra</div>
+      <ul><li>Cặp đạt · Cặp bị loại</li></ul></div>
+  </div>
+  <p>Kiểm tra prompt không <em>thêm</em> và không <em>thiếu</em> so với <code>sub_json</code>.
+  Dự kiến loại 15–20%. Bỏ bước này thì <code>sub_json</code> hết là thước đo đáng tin,
+  và toàn bộ phần đánh giá sập theo.</p>
+</div>
+
+<!-- ---------- STEP 2c ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">2c</span>
+    <span class="step-title">Chia tập dữ liệu</span>
+    <span class="step-note">code thuần</span>
+  </div>
+  <div class="io">
+    <div class="in"><div class="lbl">Đầu vào</div><ul><li>Toàn bộ cặp đã lọc</li></ul></div>
+    <div class="out"><div class="lbl">Đầu ra</div><ul><li>train / val / test</li></ul></div>
+  </div>
+  <p><strong>Chia theo <code>id</code> ảnh gốc, không chia theo cặp prompt.</strong> Một ảnh sinh ra
+  3 prompt; nếu chia theo cặp thì cùng một ảnh sẽ xuất hiện ở cả tập train lẫn tập test — kết quả
+  đánh giá sẽ bị thổi phồng.</p>
+
+  <div class="ex-lbl">Mỗi dòng dữ liệu huấn luyện</div>
+<pre>{
+  "id": "lang_bac_004211",
+  "mode": "short",
+  "user_prompt": "Ảnh chụp nhóm bạn 2 nam 1 nữ đứng trước Lăng Bác",
+  "sub_json":    { ... },   ← chỉ dùng để chấm điểm
+  "target_json": { ... }    ← NHÃN Y khi huấn luyện
+}</pre>
+</div>
+
+
+<!-- ---------- STEP 3 ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">3</span>
+    <span class="step-title">Xây bộ đánh giá &amp; đo baseline</span>
+    <span class="step-note">làm TRƯỚC khi huấn luyện</span>
+  </div>
+
+  <div class="io">
+    <div class="in"><div class="lbl">Đầu vào</div>
+      <ul><li>Tập test</li><li>Model gốc chưa tinh chỉnh</li></ul></div>
+    <div class="out"><div class="lbl">Đầu ra</div>
+      <ul><li>Bộ chỉ số chạy được</li><li>50 mẫu gán nhãn tay</li><li>Điểm baseline</li></ul></div>
+  </div>
+
+  <div class="callout">
+    <div class="t">Tại sao phải làm trước khi huấn luyện</div>
+    Thứ nhất, cần chỉ số để <em>chọn checkpoint trong lúc</em> huấn luyện.
+    Thứ hai, nếu xây thước đo sau khi đã nhìn thấy kết quả thì rất dễ vô thức chọn thước đo
+    nào làm model mình đẹp nhất. Ngoài ra không có baseline thì con số cuối cùng không nói lên gì.
+  </div>
+</div>
+
+<!-- ---------- STEP 4 ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">4</span>
+    <span class="step-title">Huấn luyện SFT</span>
+    <span class="step-note">LoRA</span>
+  </div>
+
+  <div class="io">
+    <div class="in"><div class="lbl">Đầu vào</div>
+      <ul><li>X = <code>user_prompt</code></li><li>Y = <code>target_json</code></li></ul></div>
+    <div class="out"><div class="lbl">Đầu ra</div><ul><li>LoRA adapter</li></ul></div>
+  </div>
+
+  <p><strong>Một model duy nhất</strong> cho cả 3 mức, phân biệt bằng một dòng điều khiển trong
+  system prompt (<code>DETAIL_LEVEL: short | medium | long</code>). Không tách 3 model: dữ liệu có hạn,
+  và phần khó nhất — schema cùng kiến thức văn hoá Việt — là chung cho cả ba.</p>
+
+  <div class="callout">
+    <div class="t">Điểm mấu chốt của toàn bộ thiết kế</div>
+    Cả 3 mức prompt <strong>dùng chung một nhãn Y là <code>target_json</code> đầy đủ</strong>.
+    Prompt short nghèo thông tin nhưng nhãn vẫn giàu → model buộc phải học cách
+    <strong>lấp đầy khoảng trống</strong>. Đó chính là năng lực "chi tiết hoá" mà ta cần.
+    <br><br>
+    Nếu train prompt short với nhãn là <code>sub_json</code>, model sẽ học đúng thói quen tai hại:
+    nhận prompt ngắn thì trả JSON ngắn — và ảnh sinh ra sẽ hỏng.
+  </div>
+</div>
+
+<!-- ---------- STEP 5 ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">5</span>
+    <span class="step-title">Đánh giá</span>
+  </div>
+
+  <div class="io">
+    <div class="in"><div class="lbl">Đầu vào</div>
+      <ul><li>Model đã tinh chỉnh</li><li>Tập test</li></ul></div>
+    <div class="out"><div class="lbl">Đầu ra</div>
+      <ul><li>Báo cáo, so với baseline</li></ul></div>
+  </div>
+
+  <p>Đánh giá <strong>tách riêng</strong> short / medium / long, vì bản chất nhiệm vụ khác nhau:
+  prompt ngắn đòi hỏi sáng tạo có căn cứ, prompt dài đòi hỏi trung thành tuyệt đối.</p>
+
+  <table>
+    <tr>
+      <th style="width:34mm">Nhóm chỉ số</th><th>Đo gì</th>
+      <th style="width:30mm">Đối chiếu với</th><th style="width:24mm">Áp dụng</th>
+    </tr>
+    <tr>
+      <td><strong>Tính hợp lệ</strong></td>
+      <td>JSON parse được, đúng schema, không có trường cấm</td>
+      <td class="muted">tự kiểm tra</td>
+      <td>cả 3</td>
+    </tr>
+    <tr>
+      <td><strong>Độ trung thành</strong></td>
+      <td>Từng <em>mệnh đề</em> user đã nói có được giữ lại không.<br>
+          <span class="muted">Thêm thắt KHÔNG bị trừ điểm.</span></td>
+      <td><code>sub_json</code></td>
+      <td>cả 3</td>
+    </tr>
+    <tr>
+      <td><strong>Thuật ngữ văn hoá</strong></td>
+      <td>"áo dài" phải giữ nguyên, không bị dịch thành "silk dress" hay nhầm sang kimono</td>
+      <td><code>sub_json</code></td>
+      <td>cả 3</td>
+    </tr>
+    <tr>
+      <td><strong>Không mâu thuẫn</strong></td>
+      <td>Chi tiết tự thêm không được chọi lại prompt<br>
+          <span class="muted">(prompt nói "hoàng hôn" mà JSON ghi "nắng giữa trưa")</span></td>
+      <td class="muted">tự kiểm tra</td>
+      <td>cả 3</td>
+    </tr>
+    <tr>
+      <td><strong>Độ dày</strong> <em>(Richness)</em></td>
+      <td>JSON có đủ chi tiết để model ảnh chạy tốt không — số element, mật độ thuộc tính</td>
+      <td class="muted">phân phối của 28k gốc</td>
+      <td>cả 3</td>
+    </tr>
+    <tr>
+      <td><strong>Đa dạng</strong></td>
+      <td>Sinh 5 lần cho cùng một prompt có ra 5 kết quả khác nhau không</td>
+      <td class="muted">tự so</td>
+      <td>short</td>
+    </tr>
+    <tr>
+      <td><strong>Tương đồng</strong></td>
+      <td>Khớp từng element với JSON gốc</td>
+      <td><code>target_json</code></td>
+      <td>long</td>
+    </tr>
+    <tr>
+      <td><strong>Bịa đặt</strong></td>
+      <td>Nội dung trong JSON mà prompt dài không hề nhắc tới</td>
+      <td><code>target_json</code></td>
+      <td>long</td>
+    </tr>
+  </table>
+
+  <div class="callout">
+    <div class="t">Vì sao cần cả "Độ trung thành" lẫn "Độ dày"</div>
+    Một model lười có thể đạt điểm trung thành tuyệt đối bằng cách chỉ trả lại đúng
+    3 mệnh đề mà prompt short nhắc tới, không thêm gì. Chỉ số trung thành không bắt được lỗi này,
+    nhưng ảnh sinh ra sẽ nghèo nàn. Hai chỉ số đi cặp mới mô tả đủ yêu cầu:
+    <strong>giữ đúng những gì user nói, đồng thời bồi đắp đủ dày.</strong>
+  </div>
+</div>
+
+<footer>
+  Prompt Enhancer · Kế hoạch giai đoạn 1 (SFT). DPO/GRPO sẽ xét sau khi có kết quả đánh giá.
+</footer>
+
+</body>
+</html>

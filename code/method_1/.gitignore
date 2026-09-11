@@ -1,0 +1,16 @@
+# Dữ liệu — không đẩy lên GitHub
+data/
+output/
+*.jsonl
+
+# Bí mật
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.DS_Store
