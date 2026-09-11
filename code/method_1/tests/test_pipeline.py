@@ -546,6 +546,39 @@ class TestConfig(unittest.TestCase):
             self.assertIn(entry, ignore)
 
 
+class TestJudgeFallback(unittest.TestCase):
+    """Chốt chặn cho cấu hình thực tế: key rỗng + step 2b dùng lại model chính."""
+
+    def _load(self, text):
+        tmp = Path(tempfile.mkdtemp()) / ".env"
+        tmp.write_text(text, encoding="utf-8")
+        for key in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL",
+                    "JUDGE_BASE_URL", "JUDGE_API_KEY", "JUDGE_MODEL"):
+            os.environ.pop(key, None)
+        config.load_env(str(tmp), force=True)
+
+    def test_empty_judge_config_falls_back_to_main_model(self):
+        self._load("LLM_BASE_URL=http://h:30080\nLLM_API_KEY=\nLLM_MODEL=M1\n"
+                   "JUDGE_BASE_URL=\nJUDGE_API_KEY=\nJUDGE_MODEL=\n")
+        client = s2b.make_client()
+        self.assertEqual(client.endpoint, "http://h:30080/v1/chat/completions")
+        self.assertEqual(client.model, "M1")
+
+    def test_empty_api_key_is_allowed(self):
+        self._load("LLM_BASE_URL=http://h:30080\nLLM_API_KEY=\nLLM_MODEL=M1\n")
+        client = s2b.make_client()
+        self.assertEqual(client.api_key, "")
+        # Khớp đúng lệnh curl: header có mặt nhưng phần token để trống
+        self.assertEqual(llm.build_headers(client.api_key)["Authorization"], "Bearer ")
+
+    def test_judge_override_is_used_when_set(self):
+        self._load("LLM_BASE_URL=http://a:1\nLLM_MODEL=M1\n"
+                   "JUDGE_BASE_URL=http://b:2\nJUDGE_MODEL=M2\n")
+        client = s2b.make_client()
+        self.assertEqual(client.endpoint, "http://b:2/v1/chat/completions")
+        self.assertEqual(client.model, "M2")
+
+
 class TestIoUtils(unittest.TestCase):
 
     def test_jsonl_roundtrip_preserves_vietnamese(self):
