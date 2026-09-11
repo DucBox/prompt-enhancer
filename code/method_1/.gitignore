@@ -1,6 +1,7 @@
-# Dữ liệu — không đẩy lên GitHub
-data/
+# Thư mục output của pipeline (đặt tên gì cũng được qua --out_dir)
 output/
+test_*/
+run_*/
 *.jsonl
 
 # Bí mật

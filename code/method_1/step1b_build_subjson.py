@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """STEP 1b — Lắp sub_json, nén theo 2 trục.  [không gọi model]
 
-Đầu vào : output/step0_normalized/targets.jsonl
-          output/step1a_decompose/decompose.jsonl
-Đầu ra  : output/step1b_subjson/
+Đầu vào : <out_root>/step0_normalized/targets.jsonl
+          <out_root>/step1a_decompose/decompose.jsonl
+Đầu ra  : <out_root>/step1b_subjson/
             subjson.jsonl     3 dòng mỗi ảnh (short / medium / long)
             stats.json
 
@@ -19,7 +19,7 @@ Toàn bộ quyết định cắt do CODE làm với seed cố định, nên:
   * tập mệnh đề còn sống sót = checklist chấm điểm (gold của Tier 1)
 
 Ví dụ:
-    python step1b_build_subjson.py --test --test_samples 20
+    python step1b_build_subjson.py --out_root test_1
 """
 
 from __future__ import annotations
@@ -69,9 +69,9 @@ LEVELS = ("short", "medium", "long")
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Nén target_json thành sub_json theo 3 mức")
-    p.add_argument("--targets_file", default="output/step0_normalized/targets.jsonl")
-    p.add_argument("--decompose_file", default="output/step1a_decompose/decompose.jsonl")
-    p.add_argument("--out_dir", default="output/step1b_subjson")
+    p.add_argument("--targets_file", default=None)
+    p.add_argument("--decompose_file", default=None)
+    p.add_argument("--out_dir", default=None, help="Ghi đè thư mục đầu ra của step này")
     p.add_argument("--levels", default="short,medium,long",
                    help="Các mức cần sinh, cách nhau bằng dấu phẩy")
     return io_utils.add_common_args(p).parse_args()
@@ -271,8 +271,12 @@ def main() -> None:
     args = parse_args()
     io_utils.banner(STEP, "Lắp sub_json — nén theo 2 trục (bề rộng × chiều sâu)")
 
-    targets = {r["id"]: r["target_json"] for r in io_utils.read_jsonl(Path(args.targets_file))}
-    decompositions = {r["id"]: r for r in io_utils.read_jsonl(Path(args.decompose_file))}
+    targets_file = io_utils.resolve(args.targets_file, args.out_root, "step0", "targets.jsonl")
+    decompose_file = io_utils.resolve(args.decompose_file, args.out_root, "step1a", "decompose.jsonl")
+    out_dir = io_utils.resolve(args.out_dir, args.out_root, "step1b")
+
+    targets = {r["id"]: r["target_json"] for r in io_utils.read_jsonl(targets_file)}
+    decompositions = {r["id"]: r for r in io_utils.read_jsonl(decompose_file)}
 
     common_ids = sorted(set(targets) & set(decompositions))
     missing = len(targets) - len(common_ids)
@@ -303,7 +307,7 @@ def main() -> None:
             rows.append(sub)
             per_level[level].append(sub)
 
-    n_written = io_utils.write_jsonl(Path(args.out_dir) / "subjson.jsonl", rows)
+    n_written = io_utils.write_jsonl(out_dir / "subjson.jsonl", rows)
 
     stats: Dict[str, Any] = {"n_images": len(common_ids), "n_subjson": n_written, "levels": {}}
     print("\n--- Thống kê theo mức ---")
@@ -325,13 +329,13 @@ def main() -> None:
         print("  {:<9}{:>8}{:>14.2f}{:>14.2f}{:>13.1%}".format(
             level, len(items), avg_groups, avg_facts, avg_depth_drop))
 
-    io_utils.write_json(Path(args.out_dir) / "stats.json", stats)
+    io_utils.write_json(out_dir / "stats.json", stats)
 
     io_utils.summary(**{
         "ảnh xử lý": len(common_ids),
         "sub_json sinh ra": n_written,
         "bỏ qua": n_skipped,
-        "thư mục đầu ra": args.out_dir,
+        "thư mục đầu ra": str(out_dir),
     })
 
 

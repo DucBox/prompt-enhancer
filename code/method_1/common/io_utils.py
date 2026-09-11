@@ -10,6 +10,32 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence
 
 DEFAULT_SEED = 3407
 
+# Tên thư mục con của từng step bên trong thư mục output gốc.
+# Ví dụ --out_root test_1  ->  test_1/step0_normalized/, test_1/step1a_decompose/, ...
+STEP_DIRS = {
+    "step0": "step0_normalized",
+    "step1a": "step1a_decompose",
+    "step1b": "step1b_subjson",
+    "step2a": "step2a_prompts",
+    "step2b": "step2b_filtered",
+    "step2c": "step2c_split",
+}
+
+
+def step_dir(out_root: str, step: str) -> Path:
+    """Thư mục đầu ra của một step trong cây output."""
+    if step not in STEP_DIRS:
+        raise KeyError("Step không hợp lệ: {}".format(step))
+    return Path(out_root) / STEP_DIRS[step]
+
+
+def resolve(explicit: Optional[str], out_root: str, step: str, filename: str = "") -> Path:
+    """Ưu tiên đường dẫn người dùng chỉ định; nếu không thì suy ra từ out_root."""
+    if explicit:
+        return Path(explicit)
+    base = step_dir(out_root, step)
+    return base / filename if filename else base
+
 
 def read_json(path: Path) -> Any:
     return json.loads(Path(path).read_text(encoding="utf-8"))
@@ -71,6 +97,11 @@ def add_common_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument(
         "--test_samples", type=int, default=20,
         help="Số mẫu khi bật --test (mặc định 20)",
+    )
+    parser.add_argument(
+        "--out_root", default="output",
+        help="Thư mục output gốc; mỗi step ghi vào một thư mục con bên trong "
+             "(ví dụ --out_root test_1 -> test_1/step0_normalized/, test_1/step1a_decompose/, ...)",
     )
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--env_file", default=None, help="Đường dẫn .env tuỳ chọn")

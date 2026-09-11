@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """STEP 1a — Gom nhóm khái niệm & phân rã mệnh đề.  [GỌI MODEL]
 
-Đầu vào : output/step0_normalized/targets.jsonl
-Đầu ra  : output/step1a_decompose/
+Đầu vào : <out_root>/step0_normalized/targets.jsonl
+Đầu ra  : <out_root>/step1a_decompose/
             decompose/<id>.json   {"concept_groups": [...], "facts": {...}}
             decompose.jsonl       gộp lại thành một file
             failures.json
@@ -11,8 +11,8 @@ Chạy một lần rồi CACHE: file <id>.json đã có thì bỏ qua, nên có 
 và chạy lại để tiếp tục. Sau bước này mọi việc sinh dữ liệu đều là code thuần.
 
 Ví dụ:
-    python step1a_decompose.py --test --test_samples 20
-    python step1a_decompose.py --workers 16
+    python step1a_decompose.py --out_root test_1 --dry_run
+    python step1a_decompose.py --out_root test_1 --workers 4
 """
 
 from __future__ import annotations
@@ -31,9 +31,9 @@ VALID_KINDS = {"subject", "color", "material", "attribute", "action", "position"
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="LLM gom nhóm & phân rã mệnh đề")
-    p.add_argument("--in_file", default="output/step0_normalized/targets.jsonl")
-    p.add_argument("--out_dir", default="output/step1a_decompose")
-    p.add_argument("--workers", type=int, default=8)
+    p.add_argument("--in_file", default=None, help="Mặc định: <out_root>/step0_normalized/targets.jsonl")
+    p.add_argument("--out_dir", default=None, help="Ghi đè thư mục đầu ra của step này")
+    p.add_argument("--workers", type=int, default=4)
     p.add_argument("--temperature", type=float, default=0.0,
                    help="Để 0 cho deterministic — kết quả được cache và đóng băng")
     p.add_argument("--max_tokens", type=int, default=4096)
@@ -133,10 +133,11 @@ def main() -> None:
     io_utils.banner(STEP, "LLM gom nhóm khái niệm & phân rã mệnh đề")
     config.load_env(args.env_file)
 
-    rows = io_utils.read_jsonl(Path(args.in_file))
+    in_file = io_utils.resolve(args.in_file, args.out_root, "step0", "targets.jsonl")
+    rows = io_utils.read_jsonl(in_file)
     rows = io_utils.apply_test_mode(rows, args, "mẫu")
 
-    out_dir = Path(args.out_dir)
+    out_dir = io_utils.resolve(args.out_dir, args.out_root, "step1a")
     cache_dir = out_dir / "decompose"
     cache_dir.mkdir(parents=True, exist_ok=True)
 

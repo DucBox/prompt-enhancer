@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """STEP 2b — Lọc chất lượng prompt.  [GỌI MODEL]
 
-Đầu vào : output/step2a_prompts/prompts.jsonl
-Đầu ra  : output/step2b_filtered/
+Đầu vào : <out_root>/step2a_prompts/prompts.jsonl
+Đầu ra  : <out_root>/step2b_filtered/
             judged/<id>__<level>.json
             passed.jsonl     cặp đạt, đi tiếp sang bước 2c
             rejected.jsonl   cặp bị loại, kèm lý do
@@ -16,7 +16,7 @@ Nên dùng model KHÁC HỌ với model đã sinh prompt ở bước 2a để tr
 (có thể trỏ riêng qua JUDGE_BASE_URL / JUDGE_MODEL trong .env).
 
 Ví dụ:
-    python step2b_filter.py --test --test_samples 20
+    python step2b_filter.py --out_root test_1 --workers 4
 """
 
 from __future__ import annotations
@@ -32,9 +32,9 @@ STEP = "STEP 2b"
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="LLM lọc prompt sai lệch so với checklist")
-    p.add_argument("--in_file", default="output/step2a_prompts/prompts.jsonl")
-    p.add_argument("--out_dir", default="output/step2b_filtered")
-    p.add_argument("--workers", type=int, default=8)
+    p.add_argument("--in_file", default=None, help="Mặc định: <out_root>/step2a_prompts/prompts.jsonl")
+    p.add_argument("--out_dir", default=None, help="Ghi đè thư mục đầu ra của step này")
+    p.add_argument("--workers", type=int, default=4)
     p.add_argument("--temperature", type=float, default=0.0)
     p.add_argument("--max_tokens", type=int, default=1024)
     p.add_argument("--allow_robotic", action="store_true",
@@ -87,10 +87,11 @@ def main() -> None:
     io_utils.banner(STEP, "LLM lọc chất lượng prompt")
     config.load_env(args.env_file)
 
-    rows = io_utils.read_jsonl(Path(args.in_file))
+    in_file = io_utils.resolve(args.in_file, args.out_root, "step2a", "prompts.jsonl")
+    rows = io_utils.read_jsonl(in_file)
     rows = io_utils.apply_test_mode(rows, args, "prompt")
 
-    out_dir = Path(args.out_dir)
+    out_dir = io_utils.resolve(args.out_dir, args.out_root, "step2b")
     cache_dir = out_dir / "judged"
     cache_dir.mkdir(parents=True, exist_ok=True)
 

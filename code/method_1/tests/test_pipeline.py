@@ -540,10 +540,58 @@ class TestConfig(unittest.TestCase):
             self.assertNotIn(needle, text)
         self.assertIn("LLM_BASE_URL", example.read_text(encoding="utf-8"))
 
-    def test_gitignore_blocks_env_and_data(self):
+    def test_package_gitignore_blocks_env_and_outputs(self):
         ignore = (Path(__file__).resolve().parent.parent / ".gitignore").read_text(encoding="utf-8")
-        for entry in (".env", "data/", "output/"):
+        # Bí mật + mọi thư mục output, kể cả khi người dùng tự đặt tên qua --out_dir
+        for entry in (".env", "output/", "test_*/", "run_*/"):
             self.assertIn(entry, ignore)
+
+    def test_repo_gitignore_blocks_raw_data(self):
+        root = Path(__file__).resolve().parents[3] / ".gitignore"
+        if not root.is_file():          # repo chưa init thì bỏ qua
+            self.skipTest("chưa có .gitignore ở gốc repo")
+        ignore = root.read_text(encoding="utf-8")
+        self.assertIn("/data/", ignore)
+        self.assertIn("**/output/", ignore)
+
+
+class TestOutRoot(unittest.TestCase):
+    """Mọi step ghi vào thư mục con riêng bên trong một out_root chung."""
+
+    def test_every_step_has_its_own_subdir(self):
+        names = list(io_utils.STEP_DIRS.values())
+        self.assertEqual(len(names), len(set(names)), "tên thư mục step bị trùng")
+        self.assertEqual(set(io_utils.STEP_DIRS),
+                         {"step0", "step1a", "step1b", "step2a", "step2b", "step2c"})
+
+    def test_step_dir_nests_under_out_root(self):
+        self.assertEqual(str(io_utils.step_dir("test_1", "step0")), "test_1/step0_normalized")
+        self.assertEqual(str(io_utils.step_dir("test_1", "step2c")), "test_1/step2c_split")
+
+    def test_step_dir_rejects_unknown_step(self):
+        with self.assertRaises(KeyError):
+            io_utils.step_dir("test_1", "step9")
+
+    def test_resolve_derives_path_from_out_root(self):
+        self.assertEqual(str(io_utils.resolve(None, "test_1", "step0", "targets.jsonl")),
+                         "test_1/step0_normalized/targets.jsonl")
+
+    def test_resolve_prefers_explicit_path(self):
+        self.assertEqual(str(io_utils.resolve("/tuy/chinh.jsonl", "test_1", "step0", "targets.jsonl")),
+                         "/tuy/chinh.jsonl")
+
+    def test_steps_chain_through_the_same_out_root(self):
+        """Đầu ra step trước phải là đầu vào mặc định của step sau."""
+        root = "run_x"
+        chain = [("step0", "targets.jsonl", "step1a"),
+                 ("step1b", "subjson.jsonl", "step2a"),
+                 ("step2a", "prompts.jsonl", "step2b"),
+                 ("step2b", "passed.jsonl", "step2c")]
+        for producer, filename, consumer in chain:
+            produced = io_utils.step_dir(root, producer) / filename
+            consumed = io_utils.resolve(None, root, producer, filename)
+            self.assertEqual(produced, consumed,
+                             "{} -> {} không khớp".format(producer, consumer))
 
 
 class TestJudgeFallback(unittest.TestCase):

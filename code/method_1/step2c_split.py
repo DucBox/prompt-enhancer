@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """STEP 2c — Chia tập dữ liệu & lắp dòng huấn luyện cuối cùng.  [không gọi model]
 
-Đầu vào : output/step2b_filtered/passed.jsonl
-          output/step0_normalized/targets.jsonl   (để gắn nhãn Y)
-          output/step1b_subjson/subjson.jsonl     (để gắn checklist chấm điểm)
-Đầu ra  : output/step2c_split/
+Đầu vào : <out_root>/step2b_filtered/passed.jsonl
+          <out_root>/step0_normalized/targets.jsonl   (để gắn nhãn Y)
+          <out_root>/step1b_subjson/subjson.jsonl     (để gắn checklist chấm điểm)
+Đầu ra  : <out_root>/step2c_split/
             train.jsonl  val.jsonl  test.jsonl
             split_report.json
 
@@ -17,7 +17,7 @@ trong đó target_json là NHÃN Y khi huấn luyện (đầy đủ, giống nha
 còn sub_json chỉ dùng để chấm điểm ở bước 5.
 
 Ví dụ:
-    python step2c_split.py --val_ids 700 --test_ids 700
+    python step2c_split.py --out_root test_1 --val_ids 700 --test_ids 700
 """
 
 from __future__ import annotations
@@ -34,10 +34,10 @@ STEP = "STEP 2c"
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Chia train/val/test theo id ảnh gốc")
-    p.add_argument("--in_file", default="output/step2b_filtered/passed.jsonl")
-    p.add_argument("--targets_file", default="output/step0_normalized/targets.jsonl")
-    p.add_argument("--subjson_file", default="output/step1b_subjson/subjson.jsonl")
-    p.add_argument("--out_dir", default="output/step2c_split")
+    p.add_argument("--in_file", default=None)
+    p.add_argument("--targets_file", default=None)
+    p.add_argument("--subjson_file", default=None)
+    p.add_argument("--out_dir", default=None, help="Ghi đè thư mục đầu ra của step này")
     p.add_argument("--val_ids", type=int, default=700, help="Số ẢNH cho tập val")
     p.add_argument("--test_ids", type=int, default=700, help="Số ẢNH cho tập test")
     p.add_argument("--val_ratio", type=float, default=None,
@@ -50,11 +50,15 @@ def main() -> None:
     args = parse_args()
     io_utils.banner(STEP, "Chia tập dữ liệu theo id ảnh gốc")
 
-    rows = io_utils.read_jsonl(Path(args.in_file))
-    targets = {r["id"]: r["target_json"] for r in io_utils.read_jsonl(Path(args.targets_file))}
+    in_file = io_utils.resolve(args.in_file, args.out_root, "step2b", "passed.jsonl")
+    targets_file = io_utils.resolve(args.targets_file, args.out_root, "step0", "targets.jsonl")
+    subjson_file = io_utils.resolve(args.subjson_file, args.out_root, "step1b", "subjson.jsonl")
+
+    rows = io_utils.read_jsonl(in_file)
+    targets = {r["id"]: r["target_json"] for r in io_utils.read_jsonl(targets_file)}
     subjsons = {
         "{}__{}".format(r["id"], r["detail_level"]): r
-        for r in io_utils.read_jsonl(Path(args.subjson_file))
+        for r in io_utils.read_jsonl(subjson_file)
     }
 
     all_ids = sorted({r["id"] for r in rows})
@@ -114,7 +118,7 @@ def main() -> None:
             "target_json": target,
         })
 
-    out_dir = Path(args.out_dir)
+    out_dir = io_utils.resolve(args.out_dir, args.out_root, "step2c")
     report: Dict[str, Any] = {
         "n_images": n_total,
         "n_images_val": len(val_ids),

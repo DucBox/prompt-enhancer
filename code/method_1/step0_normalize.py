@@ -2,14 +2,13 @@
 """STEP 0 — Chuẩn hoá & kiểm định dữ liệu gốc.  [không gọi model]
 
 Đầu vào : thư mục chứa các file .txt/.json, mỗi file là một JSON mô tả ảnh
-Đầu ra  : output/step0_normalized/
+Đầu ra  : <out_root>/step0_normalized/
             targets/<id>.json    target_json đã sạch, element có id
             targets.jsonl        {"id", "target_json"} — đầu vào cho step 1a
             audit_report.json    thống kê phân phối, dùng làm ngưỡng Richness
 
 Ví dụ:
-    python step0_normalize.py --in_dir ../../data/sample/_sample_1k
-    python step0_normalize.py --in_dir ../../data/raw --test --test_samples 20
+    python step0_normalize.py --in_dir DATA --out_root test_1 --test --test_samples 20
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ STEP = "STEP 0"
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Chuẩn hoá & audit target_json")
     p.add_argument("--in_dir", required=True, help="Thư mục chứa file .txt/.json gốc")
-    p.add_argument("--out_dir", default="output/step0_normalized")
+    p.add_argument("--out_dir", default=None, help="Ghi đè thư mục đầu ra của step này")
     p.add_argument("--strict", action="store_true",
                    help="Loại bỏ hẳn mẫu lỗi schema thay vì chỉ cảnh báo")
     return io_utils.add_common_args(p).parse_args()
@@ -115,7 +114,7 @@ def main() -> None:
         raise SystemExit("Không có file .txt/.json nào trong {}".format(in_dir))
     files = io_utils.apply_test_mode(files, args, "file")
 
-    out_dir = Path(args.out_dir)
+    out_dir = io_utils.resolve(args.out_dir, args.out_root, "step0")
     targets_dir = out_dir / "targets"
     targets_dir.mkdir(parents=True, exist_ok=True)
 

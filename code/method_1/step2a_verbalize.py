@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """STEP 2a — Sinh user prompt từ sub_json.  [GỌI MODEL]
 
-Đầu vào : output/step1b_subjson/subjson.jsonl
-Đầu ra  : output/step2a_prompts/
+Đầu vào : <out_root>/step1b_subjson/subjson.jsonl
+Đầu ra  : <out_root>/step2a_prompts/
             prompts/<id>__<level>.json
             prompts.jsonl
             failures.json
@@ -15,8 +15,8 @@ Mọi prompt sinh ra đều viết ĐÚNG CHÍNH TẢ. Việc chịu được đ
 thuộc về một mô-đun correction riêng đặt trước prompt enhancer, không trộn vào đây.
 
 Ví dụ:
-    python step2a_verbalize.py --test --test_samples 20
-    python step2a_verbalize.py --workers 16 --english_rate 0.2
+    python step2a_verbalize.py --out_root test_1 --dry_run
+    python step2a_verbalize.py --out_root test_1 --workers 4
 """
 
 from __future__ import annotations
@@ -52,9 +52,9 @@ NGON_NGU_EN = "tiếng Anh, nhưng GIỮ NGUYÊN các thuật ngữ văn hoá Vi
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="LLM viết user prompt từ sub_json")
-    p.add_argument("--in_file", default="output/step1b_subjson/subjson.jsonl")
-    p.add_argument("--out_dir", default="output/step2a_prompts")
-    p.add_argument("--workers", type=int, default=8)
+    p.add_argument("--in_file", default=None, help="Mặc định: <out_root>/step1b_subjson/subjson.jsonl")
+    p.add_argument("--out_dir", default=None, help="Ghi đè thư mục đầu ra của step này")
+    p.add_argument("--workers", type=int, default=4)
     p.add_argument("--temperature", type=float, default=0.9,
                    help="Cao để prompt đa dạng văn phong (khác step 1a dùng 0.0)")
     p.add_argument("--max_tokens", type=int, default=600)
@@ -123,10 +123,11 @@ def main() -> None:
     io_utils.banner(STEP, "LLM viết user prompt từ sub_json")
     config.load_env(args.env_file)
 
-    subs = io_utils.read_jsonl(Path(args.in_file))
+    in_file = io_utils.resolve(args.in_file, args.out_root, "step1b", "subjson.jsonl")
+    subs = io_utils.read_jsonl(in_file)
     subs = io_utils.apply_test_mode(subs, args, "sub_json")
 
-    out_dir = Path(args.out_dir)
+    out_dir = io_utils.resolve(args.out_dir, args.out_root, "step2a")
     cache_dir = out_dir / "prompts"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
