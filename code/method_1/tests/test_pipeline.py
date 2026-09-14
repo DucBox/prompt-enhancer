@@ -477,6 +477,94 @@ class TestSubJsonSelection(unittest.TestCase):
         bad["long"]["groups"][2]["facts"] = []
         self.assertTrue(any("không có mệnh đề nào" in e for e in self.errors(bad)))
 
+    # --- giữ một phần mức -------------------------------------------------------
+
+    def evaluate(self, selection, row_id="img1"):
+        return subjson.evaluate_selection(selection, self.sel_input(row_id))
+
+    def test_good_selection_keeps_all_levels(self):
+        result = self.evaluate(GOOD_SELECTION)
+        self.assertEqual(result["levels"], ["short", "medium", "long"])
+        self.assertEqual(result["dropped"], {})
+
+    def test_bad_short_drops_only_short(self):
+        bad = _copy(GOOD_SELECTION)
+        bad["short"]["groups"][0]["facts"].append("mặc áo dài trắng")
+        result = self.evaluate(bad)
+        self.assertTrue(result["errors"])
+        self.assertEqual(result["levels"], ["medium", "long"])
+        self.assertEqual(list(result["dropped"]), ["short"])
+
+    def test_bad_medium_keeps_short_if_nested_in_long(self):
+        bad = _copy(GOOD_SELECTION)
+        bad["medium"]["background"] = ["không có trong đầu vào"]
+        result = self.evaluate(bad)
+        self.assertEqual(result["levels"], ["short", "long"])
+        self.assertEqual(list(result["dropped"]), ["medium"])
+
+    def test_nesting_violation_drops_less_detailed_level(self):
+        bad = _copy(GOOD_SELECTION)
+        bad["medium"]["groups"][0]["facts"].remove("cô gái")
+        result = self.evaluate(bad)
+        self.assertEqual(result["levels"], ["medium", "long"])
+        self.assertTrue(any("lồng nhau" in e for e in result["dropped"]["short"]))
+
+    def test_missing_level_is_dropped_alone(self):
+        bad = _copy(GOOD_SELECTION)
+        del bad["long"]
+        self.assertEqual(self.evaluate(bad)["levels"], ["short", "medium"])
+
+    def test_non_object_keeps_nothing(self):
+        self.assertEqual(self.evaluate([])["levels"], [])
+
+    def test_kept_levels_assemble(self):
+        bad = _copy(GOOD_SELECTION)
+        bad["short"]["style"] = {"photo": ["toàn cảnh"]}
+        for level in self.evaluate(bad)["levels"]:
+            self.assertEqual(self.assemble(level, selection=bad)["detail_level"], level)
+
+    # --- vòng gọi lại kèm lỗi ---------------------------------------------------
+
+    def run_fixes(self, outputs, max_fix_attempts=2):
+        from types import SimpleNamespace
+
+        class FakeClient:
+            def __init__(self):
+                self.calls = 0
+
+            def chat(self, messages, **kwargs):
+                self.calls += 1
+                return outputs[min(self.calls, len(outputs)) - 1]
+
+        client = FakeClient()
+        args = SimpleNamespace(max_fix_attempts=max_fix_attempts, temperature=0.0, max_tokens=10)
+        return s1b.select_with_fixes(client, self.sel_input(), args), client
+
+    def test_fixes_return_full_selection_once_valid(self):
+        bad = _copy(GOOD_SELECTION)
+        bad["short"]["style"] = {"photo": ["toàn cảnh"]}
+        result, client = self.run_fixes([json.dumps(bad), json.dumps(GOOD_SELECTION)])
+        self.assertEqual(result["levels"], ["short", "medium", "long"])
+        self.assertEqual(result["n_attempts"], 2)
+        self.assertEqual(client.calls, 2)
+
+    def test_fixes_keep_valid_levels_after_last_attempt(self):
+        bad = _copy(GOOD_SELECTION)
+        bad["short"]["style"] = {"photo": ["toàn cảnh"]}
+        result, client = self.run_fixes([json.dumps(bad)])
+        self.assertEqual(client.calls, 3)
+        self.assertEqual(result["levels"], ["medium", "long"])
+        self.assertIn("short", result["dropped"])
+
+    def test_fixes_raise_with_last_output_when_nothing_kept(self):
+        with self.assertRaises(s1b.SelectionError) as ctx:
+            self.run_fixes(["không phải json"])
+        self.assertEqual(ctx.exception.last_output, "không phải json")
+
+    def test_entry_levels_defaults_to_all_for_old_cache(self):
+        self.assertEqual(s1b.entry_levels({"selection": GOOD_SELECTION}), list(subjson.LEVELS))
+        self.assertEqual(s1b.entry_levels({"levels": ["long", "medium"]}), ["medium", "long"])
+
     # --- lắp sub_json ---------------------------------------------------------
 
     def assemble(self, level, row_id="img1", selection=None):

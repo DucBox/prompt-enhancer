@@ -5,14 +5,19 @@
           <out_root>/step1a_decompose/decompose.jsonl
 Đầu ra  : <out_root>/step1b_subjson/
             selection/<id>.json   lựa chọn đã hợp lệ của LLM (cache)
-            subjson.jsonl         3 dòng mỗi ảnh (short / medium / long)
+            subjson.jsonl         tối đa 3 dòng mỗi ảnh (short / medium / long)
             stats.json
-            failures.json
+            partial.json          ảnh chỉ giữ được một phần mức + lý do bỏ từng mức
+            failures.json         ảnh không giữ được mức nào (kèm output cuối của LLM)
 
 Mỗi ảnh gọi model MỘT lần cho cả 3 mức. LLM tự quyết giữ/bỏ theo định nghĩa mức trong
 STEP1B_SYSTEM (độ phủ × độ sâu × loại thông tin); code không chọn nội dung, chỉ kiểm
 tra lựa chọn (chép nguyên văn, lồng nhau, chủ thể bắt buộc, trần từ) và gọi lại kèm
 danh sách lỗi nếu sai. Checklist ghép thẳng từ các mệnh đề đã chọn.
+
+Hết lượt sửa mà vẫn còn lỗi thì KHÔNG bỏ cả ảnh: giữ các mức tự hợp lệ và lồng nhau với
+nhau (subjson.evaluate_selection), chỉ bỏ mức hỏng. Ảnh giữ một phần vẫn được cache; chạy lại
+với --retry_partial để gọi lại riêng các ảnh này.
 
 Cache gắn dấu vân tay của (đầu vào + system prompt): 1a đổi kết quả hoặc sửa prompt 1b
 thì ảnh đó tự được gọi lại.
@@ -29,7 +34,7 @@ import hashlib
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from common import config, io_utils, llm, prompts, subjson
 
@@ -47,6 +52,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max_fix_attempts", type=int, default=2,
                    help="Số lần gọi lại kèm danh sách lỗi khi lựa chọn không hợp lệ")
     p.add_argument("--overwrite", action="store_true", help="Bỏ qua cache, gọi lại toàn bộ")
+    p.add_argument("--retry_partial", action="store_true",
+                   help="Gọi lại các ảnh trong cache chỉ giữ được một phần mức")
     p.add_argument("--dry_run", action="store_true",
                    help="Chỉ dựng messages và in ra, KHÔNG gọi model")
     return io_utils.add_common_args(p).parse_args()
@@ -58,7 +65,15 @@ def fingerprint(sel_input: Dict[str, Any]) -> str:
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()
 
 
-def cached_selection(path: Path, expected_fingerprint: str) -> Optional[Dict[str, Any]]:
+class SelectionError(llm.LLMError):
+    """Hết lượt sửa mà không giữ được mức nào; mang theo output cuối của LLM để soi lỗi."""
+
+    def __init__(self, message: str, last_output: Optional[str]) -> None:
+        super().__init__(message)
+        self.last_output = last_output
+
+
+def cached_entry(path: Path, expected_fingerprint: str) -> Optional[Dict[str, Any]]:
     if not path.is_file():
         return None
     try:
@@ -67,31 +82,59 @@ def cached_selection(path: Path, expected_fingerprint: str) -> Optional[Dict[str
         return None
     if not isinstance(item, dict) or item.get("fingerprint") != expected_fingerprint:
         return None
-    return item.get("selection")
+    if not isinstance(item.get("selection"), dict):
+        return None
+    return item
+
+
+def cached_selection(path: Path, expected_fingerprint: str) -> Optional[Dict[str, Any]]:
+    item = cached_entry(path, expected_fingerprint)
+    return item["selection"] if item else None
+
+
+def entry_levels(item: Dict[str, Any]) -> List[str]:
+    """Các mức dùng được của một cache; cache cũ (trước khi giữ một phần) luôn đủ 3 mức."""
+    levels = item.get("levels")
+    if not isinstance(levels, list):
+        return list(subjson.LEVELS)
+    return [level for level in subjson.LEVELS if level in levels]
 
 
 def select_with_fixes(
     client: llm.LLMClient, sel_input: Dict[str, Any], args: argparse.Namespace,
-) -> Tuple[Dict[str, Any], int]:
+) -> Dict[str, Any]:
+    """Gọi LLM, sửa theo lỗi tối đa `max_fix_attempts` lần. Trả về
+    {selection, n_attempts, levels, dropped}; hết lượt thì dùng lần thử giữ được nhiều mức nhất
+    (hoà thì lấy lần sau). Không giữ được mức nào -> SelectionError."""
     messages = prompts.build_step1b_messages(sel_input)
     errors: List[str] = []
+    best: Optional[Dict[str, Any]] = None
+    raw: Optional[str] = None
     for attempt in range(args.max_fix_attempts + 1):
         raw = client.chat(messages, temperature=args.temperature,
                           max_tokens=args.max_tokens, json_mode=True)
         try:
             selection = llm.parse_json_response(raw)
-            errors = subjson.validate_selection(selection, sel_input)
+            result = subjson.evaluate_selection(selection, sel_input)
+            errors = result["errors"]
         except (ValueError, llm.LLMError) as exc:
-            selection = None
+            selection, result = None, None
             errors = ["không đọc được JSON: {}".format(str(exc)[:200])]
-        if not errors:
-            return selection, attempt + 1
+        if result is not None:
+            candidate = {"selection": selection, "n_attempts": attempt + 1,
+                         "levels": result["levels"], "dropped": result["dropped"]}
+            if not errors:
+                return candidate
+            if result["levels"] and (best is None or len(result["levels"]) >= len(best["levels"])):
+                best = candidate
         messages = list(messages) + [
             {"role": "assistant", "content": raw},
             {"role": "user", "content": prompts.build_step1b_fix_message(errors)},
         ]
-    raise llm.LLMError("lựa chọn không hợp lệ sau {} lần: {}".format(
-        args.max_fix_attempts + 1, "; ".join(errors[:4])))
+    if best is not None:
+        return best
+    raise SelectionError("lựa chọn không hợp lệ sau {} lần: {}".format(
+        args.max_fix_attempts + 1, "; ".join(errors[:4])), raw)
 
 
 def main() -> None:
@@ -136,7 +179,8 @@ def main() -> None:
     n_cached = 0
     for row_id in common_ids:
         path = cache_dir / "{}.json".format(row_id)
-        if not args.overwrite and cached_selection(path, fingerprints[row_id]) is not None:
+        entry = None if args.overwrite else cached_entry(path, fingerprints[row_id])
+        if entry is not None and not (args.retry_partial and len(entry_levels(entry)) < len(subjson.LEVELS)):
             n_cached += 1
             continue
         todo.append(row_id)
@@ -151,39 +195,61 @@ def main() -> None:
         print("model    : {}\n".format(client.model))
 
         def process(row_id: str) -> str:
-            selection, n_attempts = select_with_fixes(client, inputs[row_id], args)
-            io_utils.write_json(cache_dir / "{}.json".format(row_id), {
+            path = cache_dir / "{}.json".format(row_id)
+            if args.overwrite and path.exists():
+                path.unlink()  # gọi lại thất bại thì ảnh phải vắng mặt, không rơi về cache cũ
+            result = select_with_fixes(client, inputs[row_id], args)
+            old = cached_entry(path, fingerprints[row_id])
+            if old is not None and len(entry_levels(old)) > len(result["levels"]):
+                return row_id  # --retry_partial ra kết quả kém hơn -> giữ kết quả cũ
+            io_utils.write_json(path, {
                 "fingerprint": fingerprints[row_id],
-                "n_attempts": n_attempts,
+                "n_attempts": result["n_attempts"],
+                "levels": result["levels"],
+                "dropped": result["dropped"],
                 "input": inputs[row_id],
-                "selection": selection,
+                "selection": result["selection"],
             })
             return row_id
 
         def on_error(row_id: str, exc: Exception) -> None:
-            failures.append({"id": row_id, "error": str(exc)[:600]})
+            failures.append({"id": row_id, "error": str(exc)[:600],
+                             "last_output": getattr(exc, "last_output", None)})
 
         llm.run_parallel(todo, process, workers=args.workers,
                          desc="chọn lọc", on_error=on_error)
 
     rows: List[Dict[str, Any]] = []
     attempts = Counter()
+    partial: List[Dict[str, Any]] = []
     for row_id in common_ids:
         path = cache_dir / "{}.json".format(row_id)
-        selection = cached_selection(path, fingerprints[row_id])
-        if selection is None:
+        entry = cached_entry(path, fingerprints[row_id])
+        if entry is None:
             continue
-        attempts[io_utils.read_json(path).get("n_attempts", 1)] += 1
-        for level in subjson.LEVELS:
-            rows.append(subjson.assemble_subjson(row_id, inputs[row_id], selection, level))
+        attempts[entry.get("n_attempts", 1)] += 1
+        levels = entry_levels(entry)
+        if len(levels) < len(subjson.LEVELS):
+            partial.append({"id": row_id, "kept": levels, "dropped": entry.get("dropped") or {}})
+        for level in levels:
+            rows.append(subjson.assemble_subjson(row_id, inputs[row_id], entry["selection"], level))
 
     n_written = io_utils.write_jsonl(out_dir / "subjson.jsonl", rows)
-    if failures:
-        io_utils.write_json(out_dir / "failures.json", failures)
+    # --retry_partial gọi lại thất bại vẫn còn kết quả cũ -> ảnh đó không tính là thất bại.
+    has_rows = {r["id"] for r in rows}
+    failures = [f for f in failures if f["id"] not in has_rows]
+    # Ghi (hoặc xoá) cả hai file mỗi lần chạy để không sót lại kết quả của lần chạy cũ.
+    for name, items in (("failures.json", failures), ("partial.json", partial)):
+        if items:
+            io_utils.write_json(out_dir / name, items)
+        elif (out_dir / name).exists():
+            (out_dir / name).unlink()
 
     stats: Dict[str, Any] = {
         "n_images": len(common_ids),
         "n_subjson": n_written,
+        "n_partial": len(partial),
+        "dropped_levels": dict(Counter(level for p in partial for level in p["dropped"])),
         "attempts": dict(sorted(attempts.items())),
         "levels": {},
     }
@@ -209,6 +275,9 @@ def main() -> None:
         print("  {:<8}{:>7}{:>11.2f}{:>13.2f}{:>11.1f}   {}".format(
             level, len(items), avg_groups, avg_facts, avg_words, top))
     print("  số lần gọi để ra lựa chọn hợp lệ: {}".format(stats["attempts"]))
+    if partial:
+        print("  giữ một phần: {} ảnh, mức bị bỏ: {}  (xem partial.json)".format(
+            len(partial), stats["dropped_levels"]))
 
     io_utils.write_json(out_dir / "stats.json", stats)
 
@@ -216,7 +285,8 @@ def main() -> None:
         "ảnh xử lý": len(common_ids),
         "dùng lại cache": n_cached,
         "gọi model": len(todo),
-        "thất bại": len(failures),
+        "giữ một phần mức": len(partial),
+        "thất bại (không giữ được mức nào)": len(failures),
         "sub_json sinh ra": n_written,
         "thư mục đầu ra": str(out_dir),
     })

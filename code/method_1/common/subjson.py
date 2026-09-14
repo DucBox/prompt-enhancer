@@ -283,67 +283,103 @@ def short_idea_count(parsed: Dict[str, Any], sel_input: Dict[str, Any]) -> int:
     return ideas
 
 
-def validate_selection(selection: Any, sel_input: Dict[str, Any]) -> List[str]:
-    if not isinstance(selection, dict):
-        return ["đầu ra không phải object"]
+def _nesting_errors(low: str, high: str, a: Dict[str, Any], b: Dict[str, Any]) -> List[str]:
     errors: List[str] = []
-    parsed = {level: _parse_level(level, selection.get(level), sel_input, errors) for level in LEVELS}
+    b_groups = {g["name"]: set(g["facts"]) for g in b["groups"]}
+    for group in a["groups"]:
+        if group["name"] not in b_groups:
+            errors.append("lồng nhau: nhóm {!r} có ở {} nhưng thiếu ở {}".format(
+                group["name"], low, high))
+            continue
+        lost = [f for f in group["facts"] if f not in b_groups[group["name"]]]
+        if lost:
+            errors.append("lồng nhau: nhóm {!r} ở {} có {} nhưng {} không có".format(
+                group["name"], low, lost, high))
+    lost_bg = [f for f in a["background"] if f not in b["background"]]
+    if lost_bg:
+        errors.append("lồng nhau: background {} có ở {} nhưng thiếu ở {}".format(lost_bg, low, high))
+    for key, facts in a["style"].items():
+        lost_style = [f for f in facts if f not in b["style"].get(key, [])]
+        if lost_style:
+            errors.append("lồng nhau: style[{!r}] {} có ở {} nhưng thiếu ở {}".format(
+                key, lost_style, low, high))
+    if a["medium"] and not b["medium"]:
+        errors.append("lồng nhau: medium có ở {} nhưng thiếu ở {}".format(low, high))
+    return errors
+
+
+def evaluate_selection(selection: Any, sel_input: Dict[str, Any]) -> Dict[str, Any]:
+    """Kiểm tra lựa chọn, trả về:
+        errors  mọi lỗi (gửi lại cho LLM sửa)
+        levels  các mức dùng được -- tự hợp lệ VÀ lồng nhau với các mức khác được giữ
+        dropped {mức bị bỏ: lý do}
+
+    Một mức hỏng không kéo theo các mức còn lại: mỗi dòng train là một cặp độc lập
+    (prompt của mức đó -> JSON gốc đầy đủ). Lồng nhau chỉ xét giữa các mức được giữ; hai mức
+    tự hợp lệ mà không lồng nhau thì bỏ mức ít chi tiết hơn.
+    """
+    if not isinstance(selection, dict):
+        return {"errors": ["đầu ra không phải object"], "levels": [],
+                "dropped": {level: ["đầu ra không phải object"] for level in LEVELS}}
+    level_errors: Dict[str, List[str]] = {level: [] for level in LEVELS}
+    parsed = {level: _parse_level(level, selection.get(level), sel_input, level_errors[level])
+              for level in LEVELS}
 
     required = sel_input.get("required_subject")
     for level, p in parsed.items():
         if p is None:
             continue
         if required and all(g["name"] != required for g in p["groups"]):
-            errors.append("{}: thiếu nhóm chủ thể bắt buộc {!r}".format(level, required))
+            level_errors[level].append("{}: thiếu nhóm chủ thể bắt buộc {!r}".format(level, required))
         cap = ACCEPT_CHECKLIST_WORDS[level]
         if cap is not None:
             words = checklist_words(_level_view(p, sel_input)["checklist"])
             if words > cap:
-                errors.append("{}: tổng {} từ, vượt trần {} từ".format(
+                level_errors[level].append("{}: tổng {} từ, vượt trần {} từ".format(
                     level, words, MAX_CHECKLIST_WORDS[level]))
 
     short = parsed["short"]
     if short is not None:
         if short["style"]:
-            errors.append("short: không được chọn 'style'")
+            level_errors["short"].append("short: không được chọn 'style'")
         if len(short["background"]) > 1:
-            errors.append("short: tối đa 1 ý bối cảnh")
+            level_errors["short"].append("short: tối đa 1 ý bối cảnh")
         ideas = short_idea_count(short, sel_input)
         if ideas > SHORT_MAX_IDEAS:
-            errors.append("short: có {} ý ngoài chủ thể chính, tối đa {}".format(ideas, SHORT_MAX_IDEAS))
+            level_errors["short"].append(
+                "short: có {} ý ngoài chủ thể chính, tối đa {}".format(ideas, SHORT_MAX_IDEAS))
 
+    errors = [e for level in LEVELS for e in level_errors[level]]
     for low, high in (("short", "medium"), ("medium", "long")):
-        a, b = parsed[low], parsed[high]
-        if a is None or b is None:
-            continue
-        b_groups = {g["name"]: set(g["facts"]) for g in b["groups"]}
-        for group in a["groups"]:
-            if group["name"] not in b_groups:
-                errors.append("lồng nhau: nhóm {!r} có ở {} nhưng thiếu ở {}".format(
-                    group["name"], low, high))
-                continue
-            lost = [f for f in group["facts"] if f not in b_groups[group["name"]]]
-            if lost:
-                errors.append("lồng nhau: nhóm {!r} ở {} có {} nhưng {} không có".format(
-                    group["name"], low, lost, high))
-        lost_bg = [f for f in a["background"] if f not in b["background"]]
-        if lost_bg:
-            errors.append("lồng nhau: background {} có ở {} nhưng thiếu ở {}".format(lost_bg, low, high))
-        for key, facts in a["style"].items():
-            lost_style = [f for f in facts if f not in b["style"].get(key, [])]
-            if lost_style:
-                errors.append("lồng nhau: style[{!r}] {} có ở {} nhưng thiếu ở {}".format(
-                    key, lost_style, low, high))
-        if a["medium"] and not b["medium"]:
-            errors.append("lồng nhau: medium có ở {} nhưng thiếu ở {}".format(low, high))
+        if parsed[low] is not None and parsed[high] is not None:
+            errors += _nesting_errors(low, high, parsed[low], parsed[high])
 
-    return errors
+    dropped = {level: errs for level, errs in level_errors.items() if errs}
+    # Đi từ mức chi tiết nhất xuống: mỗi mức phải nằm trong mức lớn gần nhất còn được giữ
+    # (lồng nhau có tính bắc cầu nên so với mức gần nhất là đủ).
+    kept: List[str] = []
+    for level in reversed(LEVELS):
+        if level in dropped:
+            continue
+        if kept:
+            nest = _nesting_errors(level, kept[-1], parsed[level], parsed[kept[-1]])
+            if nest:
+                dropped[level] = nest
+                continue
+        kept.append(level)
+
+    return {"errors": errors, "levels": [level for level in LEVELS if level in kept],
+            "dropped": dropped}
+
+
+def validate_selection(selection: Any, sel_input: Dict[str, Any]) -> List[str]:
+    return evaluate_selection(selection, sel_input)["errors"]
 
 
 def assemble_subjson(
     row_id: str, sel_input: Dict[str, Any], selection: Dict[str, Any], level: str,
 ) -> Dict[str, Any]:
-    """Lắp sub_json của một mức từ lựa chọn ĐÃ QUA validate_selection."""
+    """Lắp sub_json của một mức nằm trong `levels` của evaluate_selection."""
     errors: List[str] = []
     parsed = _parse_level(level, selection.get(level), sel_input, errors)
     if parsed is None:

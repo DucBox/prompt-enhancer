@@ -95,9 +95,14 @@ mạng — dùng để soi prompt trước khi đốt tiền.
   (element, background, photo/art_style, lighting, aesthetics) thành mệnh đề tiếng Việt đã xếp
   hạng. 1b đưa bản phân rã + định nghĩa short/medium/long (độ phủ × độ sâu × loại thông tin)
   cho LLM chọn cả 3 mức trong một lần gọi. Code chỉ KIỂM TRA: chép nguyên văn, lồng nhau
-  short ⊆ medium ⊆ long, chủ thể bắt buộc (từ tên file), trần từ (short 16, medium 50); sai
-  thì gọi lại kèm danh sách lỗi (`--max_fix_attempts`, mặc định 2). Checklist ghép thẳng từ
-  các mệnh đề đã chọn, và 2a chỉ nhận đúng các mệnh đề đó.
+  short ⊆ medium ⊆ long, chủ thể bắt buộc (từ tên file), trần từ (prompt ghi short 16 /
+  medium 50, code chấp nhận tới 20 / 55); sai thì gọi lại kèm danh sách lỗi
+  (`--max_fix_attempts`, mặc định 2). Checklist ghép thẳng từ các mệnh đề đã chọn, và 2a chỉ
+  nhận đúng các mệnh đề đó.
+- **Hỏng mức nào bỏ mức đó.** Hết lượt sửa mà vẫn lỗi thì 1b giữ các mức tự hợp lệ và lồng
+  nhau với nhau (hai mức hợp lệ mà không lồng nhau thì bỏ mức ít chi tiết hơn), ghi lý do vào
+  `step1b_subjson/partial.json`. Chỉ ảnh không giữ được mức nào mới vào `failures.json` (kèm
+  output cuối của LLM). `--retry_partial` gọi lại riêng các ảnh giữ một phần.
 - **Deterministic.** 1a và 1b chạy ở `temperature=0` và được cache. Cache 1b gắn dấu vân tay
   (đầu vào + system prompt) — 1a đổi kết quả hoặc sửa prompt 1b thì ảnh đó tự được gọi lại.
 - **Model chấm lọc riêng.** Step 2b ưu tiên `JUDGE_BASE_URL` / `JUDGE_MODEL` nếu `.env`
@@ -120,7 +125,7 @@ mạng — dùng để soi prompt trước khi đốt tiền.
 ## Test
 
 ```bash
-python3 tests/test_pipeline.py       # 125 test, không chạm mạng
+python3 tests/test_pipeline.py       # 138 test, không chạm mạng
 ```
 
 Logic thuần được test đầy đủ hành vi. Phần gọi model chỉ test được những gì test

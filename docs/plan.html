@@ -407,7 +407,10 @@ background "The surface of a wide, murky brown river fills the frame."
     <tr><td>Định nghĩa short</td><td>Không style, tối đa 1 ý bối cảnh, tối đa 2 ý ngoài chủ thể</td></tr>
     <tr><td>Trần từ</td><td>Prompt ghi short 16, medium 50; code đếm lại và chấp nhận tới short 20, medium 55 (LLM đếm từ hay lệch vài tiếng)</td></tr>
   </table>
-  <p>Sai thì gọi lại <strong>kèm đúng danh sách lỗi</strong>, tối đa 2 lần. Cache gắn dấu vân tay
+  <p>Sai thì gọi lại <strong>kèm đúng danh sách lỗi</strong>, tối đa 2 lần. Hết lượt mà vẫn lỗi thì
+  <strong>chỉ bỏ mức hỏng</strong>: giữ các mức tự hợp lệ và lồng nhau với nhau (ghi lý do vào
+  <code>partial.json</code>) — mỗi dòng train là một cặp độc lập nên thiếu short không làm hỏng
+  dòng medium/long. Cache gắn dấu vân tay
   (đầu vào + system prompt): 1a đổi kết quả hoặc sửa prompt 1b thì ảnh đó tự được gọi lại.
   <code>stats.json</code> ghi phân bố số mệnh đề theo mức để phát hiện LLM có rơi vào một khuôn cố
   định không.</p>
