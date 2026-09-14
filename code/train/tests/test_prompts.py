@@ -64,6 +64,25 @@ class TestBuildSystemPrompt(unittest.TestCase):
             self.assertNotIn('"id"', text)
             self.assertIn("no id field", text)
 
+    def test_levels_are_defined_by_content_not_word_counts(self):
+        """Số từ thực tế lệch xa mọi khoảng cố định (long 54-402 từ) -- mô tả mức theo
+        NỘI DUNG giống định nghĩa ở step 1b, không ghi khoảng số từ."""
+        import re
+        for level in prompts.LEVELS:
+            text = prompts.build_system_prompt(level)
+            self.assertIsNone(re.search(r"\d+\s*-\s*\d+\s*words", text), level)
+
+    def test_lists_medium_values_seen_in_data(self):
+        for level in prompts.LEVELS:
+            text = prompts.build_system_prompt(level)
+            for medium in ("photograph", "illustration", "3d_render"):
+                self.assertIn('"{}"'.format(medium), text)
+
+    def test_input_may_be_vietnamese_or_english(self):
+        for level in prompts.LEVELS:
+            text = prompts.build_system_prompt(level)
+            self.assertIn("Vietnamese or in English", text)
+
     def test_schema_documents_both_style_key_orders(self):
         """Ideogram dùng hai thứ tự khác nhau: ảnh chụp thì `photo` TRƯỚC `medium`,
         còn lại thì `art_style` SAU `medium`. Gộp làm một là sai một nửa."""

@@ -7,11 +7,16 @@ Supports:
   * 1 GPU: Unsloth FastModel QLoRA (recommended OSS path)
   * multi GPU: Transformers + PEFT QLoRA under torchrun/DDP
 
-Expected JSONL (field names are configurable; matches code/method_1/step2c_split.py output):
+Expected JSONL (field names are configurable; matches code/method_1/step2d_finalize.py output,
+i.e. <out_root>/step2d_final/{train,val}.jsonl -- NOT step2c_split, whose targets still carry `id`):
   {"user_prompt":"...", "mode":"short|medium|long", "cot":"...", "target_json": {...}}
 
 The target should already be your normalized Prompt-Enhancer target (for this project:
-Ideogram-4-like JSON without bbox/color_palette fields).
+Ideogram-4-like JSON without id/bbox/color_palette fields).
+
+Data is read line by line with json.loads (data_utils.read_jsonl_rows), NOT
+datasets.load_dataset("json"): Arrow would unify target_json into one struct and insert
+null keys (art_style/photo/text) into every row.
 
 "mode" (short/medium/long) selects WHICH SYSTEM PROMPT is used for that row -- see
 prompts.py. Each level has its own distinct system prompt (not a shared prompt with
@@ -34,10 +39,11 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 import torch
-from datasets import Dataset, load_dataset
+from datasets import Dataset
 from transformers import Trainer, TrainingArguments, set_seed
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from data_utils import read_jsonl_rows, target_to_minified_json  # noqa: E402
 from prompts import LEVELS, build_system_prompt  # noqa: E402
 
 
@@ -137,50 +143,6 @@ def resolve_system_prompt(ex: Dict[str, Any], args: argparse.Namespace,
     return build_system_prompt(level)
 
 
-def contains_forbidden_training_fields(obj: Any) -> bool:
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            if k in {"bbox", "color_palette"}:
-                return True
-            if contains_forbidden_training_fields(v):
-                return True
-    elif isinstance(obj, list):
-        return any(contains_forbidden_training_fields(x) for x in obj)
-    return False
-
-
-def target_to_minified_json(value: Any, *, validate: bool, allow_bbox_palette: bool) -> str:
-    if isinstance(value, str):
-        text = value.strip()
-        if not validate:
-            return text
-        try:
-            obj = json.loads(text)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"target is not valid JSON: {e}") from e
-    elif isinstance(value, dict):
-        obj = value
-    else:
-        raise ValueError(f"target must be a JSON object or JSON string, got {type(value).__name__}")
-
-    if not isinstance(obj, dict):
-        raise ValueError("target JSON must be an object")
-
-    if validate:
-        required = {"high_level_description", "style_description", "compositional_deconstruction"}
-        missing = required - set(obj.keys())
-        if missing:
-            raise ValueError(f"target missing required top-level fields: {sorted(missing)}")
-        comp = obj.get("compositional_deconstruction")
-        if not isinstance(comp, dict) or "background" not in comp or "elements" not in comp:
-            raise ValueError("compositional_deconstruction must contain background and elements")
-        if not allow_bbox_palette and contains_forbidden_training_fields(obj):
-            raise ValueError("target contains bbox/color_palette; normalize them out before PE SFT")
-
-    # json.dumps preserves dict insertion order and keeps Vietnamese characters literal.
-    return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
-
-
 def get_text_tokenizer(processor_or_tokenizer: Any):
     tok = getattr(processor_or_tokenizer, "tokenizer", processor_or_tokenizer)
     if tok.pad_token_id is None:
@@ -273,7 +235,7 @@ def encode_record(ex: Dict[str, Any], tokenizer, args: argparse.Namespace,
 
 def prepare_dataset(path: str, tokenizer, args: argparse.Namespace,
                     system_prompt_override: Optional[str]) -> Dataset:
-    raw = load_dataset("json", data_files=path, split="train")
+    raw = read_jsonl_rows(path)  # KHÔNG dùng load_dataset("json") -- xem data_utils.py
     rows: List[Dict[str, Any]] = []
     errors = 0
     too_long = 0

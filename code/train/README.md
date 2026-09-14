@@ -1,17 +1,25 @@
 # Train — SFT Prompt Enhancer (Qwen3.6-27B, LoRA)
 
-Bước 4 của plan: nhận `train.jsonl`/`val.jsonl` từ
-[`code/method_1/step2c_split.py`](../method_1/step2c_split.py), train MỘT model
+Bước 4 của plan: nhận `train.jsonl`/`val.jsonl` từ `step2d_final/`
+([`code/method_1/step2d_finalize.py`](../method_1/step2d_finalize.py)), train MỘT model
 (LoRA adapter) làm nhiệm vụ `user_prompt → target_json` cho cả 3 mức short/medium/long.
 
 Chạy trên server có GPU — file này import `torch`/`transformers`/`datasets` nên
-**không chạy/test được trên máy không có các thư viện đó**. Phần logic thuần (ghép
-system prompt theo mức) tách riêng ở [`prompts.py`](prompts.py), test được ở
-[`tests/test_prompts.py`](tests/test_prompts.py) mà không cần GPU:
+**không chạy/test được trên máy không có các thư viện đó**. Phần logic thuần tách riêng,
+test được mà không cần GPU:
+
+* [`prompts.py`](prompts.py) — ghép system prompt theo mức.
+* [`data_utils.py`](data_utils.py) — đọc JSONL và kiểm tra target.
 
 ```bash
-python3 -m unittest discover -s tests -p "test_prompts.py"
+python3 -m unittest discover -s tests
 ```
+
+**Không đọc dữ liệu bằng `datasets.load_dataset("json")`.** Arrow gộp `target_json` của mọi
+dòng thành một schema chung và chèn key thiếu với giá trị `null` (`"art_style": null` vào
+target ảnh chụp, `"photo": null` vào target tranh/3D, `"text": null` vào mọi element obj) —
+model sẽ học sinh ra các key đó. Script đọc từng dòng bằng `json.loads` và từ chối target
+còn `null`, `id`, `bbox` hoặc `color_palette`.
 
 ## Quyết định thiết kế: mỗi mức một system prompt riêng
 
@@ -19,13 +27,17 @@ Train chung MỘT model cho cả 3 mức, nhưng **mỗi mức dùng một syste
 nhau** (không phải một prompt chung kèm nhãn `DETAIL_LEVEL: short`) — vì việc model
 cần làm ở mỗi mức thực sự khác nhau:
 
-* **short** — input chỉ 8-20 từ, nêu vài ý chính. Model phải **tự bổ sung** chi
-  tiết hợp lý (ánh sáng, bối cảnh, chất liệu...) để JSON vẫn đầy đủ như một caption
-  chuyên nghiệp — không được để JSON nghèo nàn theo độ ngắn của input.
-* **medium** — input 30-60 từ, đã nêu vài ý rõ. Giữ nguyên phần đã có, lấp phần
-  còn thiếu.
-* **long** — input 100-200 từ, gần như đầy đủ. Việc chính là **cấu trúc hoá trung
-  thành** những gì user đã mô tả, hạn chế tối đa tự thêm.
+* **short** — user chỉ nêu chủ thể chính cùng 1–2 ý (thuộc tính nổi bật, số lượng hoặc
+  một địa điểm có bản sắc). Model phải **tự bổ sung** chi tiết hợp lý (ánh sáng, bối
+  cảnh, chất liệu...) để JSON vẫn đầy đủ như một caption chuyên nghiệp — không được để
+  JSON nghèo nàn theo độ ngắn của input.
+* **medium** — user tả các phần chính (chủ thể với vài thuộc tính, 1–3 chủ thể phụ, bối
+  cảnh chính). Giữ nguyên phần đã có, lấp phần còn thiếu.
+* **long** — user tả gần như toàn bộ ảnh. Việc chính là **cấu trúc hoá trung thành**
+  những gì user đã mô tả, hạn chế tối đa tự thêm.
+
+Mức được định nghĩa theo NỘI DUNG (giống step 1b), không theo số từ: trên `test_5_new`
+prompt long dài 54–402 từ, nên một khoảng số từ cố định trong system prompt sẽ mô tả sai.
 
 Hệ quả bắt buộc: **ứng dụng gọi model lúc inference phải biết trước đang phục vụ
 mức nào** (short/medium/long) để chọn đúng system prompt — giống hệt lúc train.
@@ -36,23 +48,24 @@ file tương ứng khi gọi model.
 
 ## Chạy train
 
-`step2c_split.py` sinh sẵn field `"mode"` (short/medium/long) trong mỗi dòng —
-script train đọc field này để tự chọn đúng system prompt (`--detail_level_field`,
-mặc định `mode`, không cần chỉnh nếu dùng đúng pipeline ở `code/method_1`).
+Dùng `step2d_final/` — **không** dùng `step2c_split/` (target ở đó còn `id`; script sẽ từ
+chối). Mỗi dòng có field `"mode"` (short/medium/long) — script train đọc field này để tự
+chọn đúng system prompt (`--detail_level_field`, mặc định `mode`). Dữ liệu hiện chưa có
+CoT nên dùng `--mode no_cot`.
 
 ```bash
 # 1 GPU (khuyến nghị, Unsloth QLoRA)
 python3 train_prompt_enhancer_qwen36.py \
-  --train_file  ../method_1/outputs/run_full/step2c_split/train.jsonl \
-  --eval_file   ../method_1/outputs/run_full/step2c_split/val.jsonl \
+  --train_file  ../method_1/outputs/run_full/step2d_final/train.jsonl \
+  --eval_file   ../method_1/outputs/run_full/step2d_final/val.jsonl \
   --output_dir  ./runs/pe_v1 \
   --mode no_cot \
   --backend unsloth
 
 # nhiều GPU (fallback HF/PEFT + DDP)
 torchrun --nproc_per_node=4 train_prompt_enhancer_qwen36.py \
-  --train_file  ../method_1/outputs/run_full/step2c_split/train.jsonl \
-  --eval_file   ../method_1/outputs/run_full/step2c_split/val.jsonl \
+  --train_file  ../method_1/outputs/run_full/step2d_final/train.jsonl \
+  --eval_file   ../method_1/outputs/run_full/step2d_final/val.jsonl \
   --output_dir  ./runs/pe_v1 \
   --mode no_cot \
   --backend hf
