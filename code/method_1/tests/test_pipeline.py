@@ -453,8 +453,18 @@ class TestSubJsonSelection(unittest.TestCase):
         self.assertEqual(self.errors(good), [])
 
     def test_rejects_word_cap_exceeded(self):
-        with mock.patch.dict(subjson.MAX_CHECKLIST_WORDS, {"short": 5}):
+        with mock.patch.dict(subjson.ACCEPT_CHECKLIST_WORDS, {"short": 5}):
             self.assertTrue(any("vượt trần" in e for e in self.errors(GOOD_SELECTION)))
+
+    def test_accepts_small_overshoot_of_prompt_cap(self):
+        # Vượt trần trong prompt nhưng vẫn dưới ngưỡng chấp nhận -> hợp lệ.
+        with mock.patch.dict(subjson.MAX_CHECKLIST_WORDS, {"short": 1, "medium": 1}):
+            self.assertEqual(self.errors(GOOD_SELECTION), [])
+
+    def test_accept_threshold_is_looser_than_prompt_cap(self):
+        for level in ("short", "medium"):
+            self.assertGreater(subjson.ACCEPT_CHECKLIST_WORDS[level], subjson.MAX_CHECKLIST_WORDS[level])
+        self.assertEqual(subjson.ACCEPT_CHECKLIST_WORDS, {"short": 20, "medium": 55, "long": None})
 
     def test_rejects_missing_required_subject(self):
         bad = _copy(GOOD_SELECTION)

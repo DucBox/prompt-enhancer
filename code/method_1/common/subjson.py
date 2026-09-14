@@ -23,6 +23,10 @@ from common import schema
 LEVELS = ("short", "medium", "long")
 LENGTH_HINT = {"short": "8-20 từ", "medium": "30-60 từ", "long": "100-200 từ"}
 MAX_CHECKLIST_WORDS: Dict[str, Optional[int]] = {"short": 16, "medium": 50, "long": None}
+# Trần LLM nhắm tới (ghi trong prompt) và ngưỡng code thực sự chấp nhận là hai số khác nhau:
+# LLM đếm từ không chính xác, hay lệch vài tiếng. Đổi ngưỡng này KHÔNG làm mất cache 1b vì
+# dấu vân tay chỉ tính prompt.
+ACCEPT_CHECKLIST_WORDS: Dict[str, Optional[int]] = {"short": 20, "medium": 55, "long": None}
 SHORT_MAX_IDEAS = 2
 STYLE_FIELDS = ("photo", "art_style", "lighting", "aesthetics")
 
@@ -291,11 +295,12 @@ def validate_selection(selection: Any, sel_input: Dict[str, Any]) -> List[str]:
             continue
         if required and all(g["name"] != required for g in p["groups"]):
             errors.append("{}: thiếu nhóm chủ thể bắt buộc {!r}".format(level, required))
-        cap = MAX_CHECKLIST_WORDS[level]
+        cap = ACCEPT_CHECKLIST_WORDS[level]
         if cap is not None:
             words = checklist_words(_level_view(p, sel_input)["checklist"])
             if words > cap:
-                errors.append("{}: tổng {} từ, vượt trần {} từ".format(level, words, cap))
+                errors.append("{}: tổng {} từ, vượt trần {} từ".format(
+                    level, words, MAX_CHECKLIST_WORDS[level]))
 
     short = parsed["short"]
     if short is not None:
