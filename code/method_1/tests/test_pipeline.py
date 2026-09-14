@@ -23,7 +23,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from common import config, io_utils, llm, prompts, schema  # noqa: E402
+from common import config, io_utils, llm, prompts, schema, subjson  # noqa: E402
 import step1b_build_subjson as s1b  # noqa: E402
 import step2a_verbalize as s2a  # noqa: E402
 import step2b_filter as s2b  # noqa: E402
@@ -72,12 +72,78 @@ SAMPLE_DECOMP = {
         "4": [{"rank": 0, "kind": "subject", "text": "hàng cây xanh"},
               {"rank": 1, "kind": "position", "text": "hai bên quảng trường"}],
     },
+    "background_facts": [
+        {"rank": 0, "kind": "subject", "text": "quảng trường Ba Đình"},
+        {"rank": 1, "kind": "attribute", "text": "rộng"},
+        {"rank": 2, "kind": "subject", "text": "bầu trời trong xanh"},
+        {"rank": 3, "kind": "subject", "text": "vài đám mây trắng"},
+    ],
+    "style_facts": {
+        "photo": [{"rank": 0, "text": "toàn cảnh"},
+                  {"rank": 1, "text": "ngang tầm mắt"},
+                  {"rank": 2, "text": "lấy nét sâu"}],
+        "lighting": [{"rank": 0, "text": "nắng sớm"}],
+        "aesthetics": [{"rank": 0, "text": "phong cách phóng sự"}],
+    },
 }
 
 
 # =============================================================================
 # STEP 0 — schema
 # =============================================================================
+
+class TestStripIds(unittest.TestCase):
+    """`id` là tay cầm nội bộ, không thuộc schema Ideogram 4 -- phải bóc khỏi nhãn Y.
+
+    Bắt được lỗi thật: outputs/test_6 có 1631 element mang `id` lọt vào target_json
+    của tập train/val/test, đúng thứ mà CaptionVerifier của Ideogram báo
+    "unknown keys ['id']".
+    """
+
+    def test_removes_id_from_every_element(self):
+        out = schema.strip_ids(SAMPLE_TARGET)
+        for el in out["compositional_deconstruction"]["elements"]:
+            self.assertNotIn("id", el)
+
+    def test_does_not_mutate_input(self):
+        before = json.dumps(SAMPLE_TARGET, sort_keys=True)
+        schema.strip_ids(SAMPLE_TARGET)
+        self.assertEqual(json.dumps(SAMPLE_TARGET, sort_keys=True), before)
+
+    def test_keeps_everything_except_id(self):
+        out = schema.strip_ids(SAMPLE_TARGET)
+        for src, got in zip(schema.elements_of(SAMPLE_TARGET),
+                            out["compositional_deconstruction"]["elements"]):
+            self.assertEqual({k: v for k, v in src.items() if k != "id"}, got)
+
+    def test_element_key_order_matches_ideogram(self):
+        out = schema.strip_ids(SAMPLE_TARGET)
+        for el in out["compositional_deconstruction"]["elements"]:
+            expected = [k for k in ("type", "text", "desc") if k in el]
+            self.assertEqual(list(el), expected)
+
+    def test_photo_captions_put_photo_before_medium(self):
+        style = {"medium": "photograph", "lighting": "soft", "photo": "35mm",
+                 "aesthetics": "warm"}
+        self.assertEqual(list(schema.reorder(style, schema.STYLE_ORDER)),
+                         ["aesthetics", "lighting", "photo", "medium"])
+
+    def test_non_photo_captions_put_art_style_after_medium(self):
+        """Ideogram đảo thứ tự cho caption không phải ảnh chụp -- xem
+        third_party/ideogram4/src/ideogram4/caption_verifier.py."""
+        style = {"art_style": "flat vector", "medium": "illustration",
+                 "lighting": "even", "aesthetics": "minimal"}
+        self.assertEqual(list(schema.reorder(style, schema.STYLE_ORDER)),
+                         ["aesthetics", "lighting", "medium", "art_style"])
+
+    def test_strip_ids_reorders_art_style_after_medium(self):
+        target = json.loads(json.dumps(SAMPLE_TARGET))
+        target["style_description"] = {"aesthetics": "a", "lighting": "l",
+                                       "art_style": "flat vector", "medium": "illustration"}
+        out = schema.strip_ids(target)
+        self.assertEqual(list(out["style_description"]),
+                         ["aesthetics", "lighting", "medium", "art_style"])
+
 
 class TestSchema(unittest.TestCase):
 
@@ -177,464 +243,285 @@ class TestDecomposeValidation(unittest.TestCase):
         self.assertEqual(out["facts"]["0"][1]["kind"], "attribute")  # kind lạ -> attribute
         self.assertEqual(out["concept_groups"][0]["member_ids"], [0, 1])  # đã sắp xếp
 
+    def test_rejects_missing_background_facts(self):
+        bad = json.loads(json.dumps(SAMPLE_DECOMP))
+        del bad["background_facts"]
+        errors = s1a.validate_decomposition(bad, SAMPLE_TARGET)
+        self.assertTrue(any("background_facts" in e for e in errors))
+
+    def test_rejects_background_facts_without_rank_zero(self):
+        bad = json.loads(json.dumps(SAMPLE_DECOMP))
+        bad["background_facts"] = [{"rank": 1, "kind": "color", "text": "xanh"}]
+        errors = s1a.validate_decomposition(bad, SAMPLE_TARGET)
+        self.assertTrue(any("background_facts" in e and "rank 0" in e for e in errors))
+
+    def test_rejects_missing_style_field(self):
+        bad = json.loads(json.dumps(SAMPLE_DECOMP))
+        del bad["style_facts"]["lighting"]
+        errors = s1a.validate_decomposition(bad, SAMPLE_TARGET)
+        self.assertTrue(any("style_facts['lighting']" in e for e in errors))
+
+    def test_rejects_style_field_not_in_target(self):
+        """Ảnh chụp (có `photo`) mà model lại trả `art_style` -> phải bắt được nhầm lẫn."""
+        bad = json.loads(json.dumps(SAMPLE_DECOMP))
+        bad["style_facts"]["art_style"] = [{"rank": 0, "text": "tranh khắc gỗ"}]
+        errors = s1a.validate_decomposition(bad, SAMPLE_TARGET)
+        self.assertTrue(any("art_style" in e and "không có trong đầu vào" in e for e in errors))
+
+    def test_rejects_decomposing_medium(self):
+        bad = json.loads(json.dumps(SAMPLE_DECOMP))
+        bad["style_facts"]["medium"] = [{"rank": 0, "text": "ảnh chụp"}]
+        errors = s1a.validate_decomposition(bad, SAMPLE_TARGET)
+        self.assertTrue(any("medium" in e for e in errors))
+
+    def test_art_style_target_expects_art_style_not_photo(self):
+        target = json.loads(json.dumps(SAMPLE_TARGET))
+        target["style_description"] = {
+            "aesthetics": "folk art, flat", "lighting": "flat even illumination",
+            "medium": "illustration", "art_style": "woodblock print style, bold black outlines",
+        }
+        good = json.loads(json.dumps(SAMPLE_DECOMP))
+        good["style_facts"] = {
+            "art_style": [{"rank": 0, "text": "tranh khắc gỗ"}, {"rank": 1, "text": "nét viền đen đậm"}],
+            "lighting": [{"rank": 0, "text": "ánh sáng đều"}],
+            "aesthetics": [{"rank": 0, "text": "nghệ thuật dân gian"}, {"rank": 1, "text": "phẳng"}],
+        }
+        self.assertEqual(s1a.validate_decomposition(good, target), [])
+
+    def test_normalize_reindexes_background_and_style_ranks(self):
+        messy = {
+            "concept_groups": [], "facts": {},
+            "background_facts": [{"rank": 5, "kind": "weird", "text": "b"},
+                                 {"rank": 2, "kind": "subject", "text": "a"}],
+            "style_facts": {"lighting": [{"rank": 3, "text": "y"}, {"rank": 1, "text": "x"}],
+                            "medium": [{"rank": 0, "text": "ảnh chụp"}]},
+        }
+        out = s1a.normalize_decomposition(messy)
+        self.assertEqual([f["text"] for f in out["background_facts"]], ["a", "b"])
+        self.assertEqual([f["rank"] for f in out["background_facts"]], [0, 1])
+        self.assertEqual(out["background_facts"][1]["kind"], "attribute")
+        self.assertEqual([f["text"] for f in out["style_facts"]["lighting"]], ["x", "y"])
+        self.assertNotIn("kind", out["style_facts"]["lighting"][0])
+        self.assertNotIn("medium", out["style_facts"])
+
+    def test_normalize_sets_every_field_priority_to_one(self):
+        out = s1a.normalize_decomposition(SAMPLE_DECOMP)
+        self.assertEqual(out["field_priority"], {
+            "elements": 1, "background": 1, "photo": 1, "lighting": 1, "aesthetics": 1,
+        })
+
+    def test_cache_from_old_schema_is_stale(self):
+        """Cache sinh trước khi có background_facts/style_facts không được dùng lẫn."""
+        with tempfile.TemporaryDirectory() as d:
+            old = Path(d) / "old.json"
+            new = Path(d) / "new.json"
+            io_utils.write_json(old, {"concept_groups": [], "facts": {}})
+            io_utils.write_json(new, s1a.normalize_decomposition(SAMPLE_DECOMP))
+            self.assertFalse(s1a.is_cache_current(old))
+            self.assertTrue(s1a.is_cache_current(new))
+
+    def test_system_prompt_covers_new_fields_and_skips_medium(self):
+        text = prompts.STEP1A_SYSTEM
+        for key in ("background_facts", "style_facts", '"photo"', '"art_style"',
+                    '"lighting"', '"aesthetics"'):
+            self.assertIn(key, text)
+        self.assertIn('KHÔNG phân rã "medium"', text)
+        self.assertIn("KHÔNG bỏ bớt thông tin", text)
+
 
 # =============================================================================
-# STEP 1b — nén 2 trục
+# STEP 1b — LLM chọn lọc short / medium / long
 # =============================================================================
 
-class TestBuildSubJson(unittest.TestCase):
+GOOD_SELECTION = {
+    "short": {
+        "groups": [{"name": "nhóm bạn", "facts": ["nam thanh niên", "cô gái", "số lượng: 3"]},
+                   {"name": "Lăng Bác", "facts": []}],
+        "background": [], "style": {}, "medium": False,
+    },
+    "medium": {
+        "groups": [{"name": "nhóm bạn",
+                    "facts": ["nam thanh niên", "cô gái", "số lượng: 3", "mặc áo dài trắng"]},
+                   {"name": "Lăng Bác", "facts": ["bằng đá granite xám"]}],
+        "background": ["quảng trường Ba Đình"], "style": {}, "medium": False,
+    },
+    "long": {
+        "groups": [{"name": "nhóm bạn",
+                    "facts": ["nam thanh niên", "cô gái", "số lượng: 3", "mặc áo dài trắng",
+                              "áo sơ mi trắng", "áo phông đen", "đứng bên trái", "đứng giữa",
+                              "đứng bên phải"]},
+                   {"name": "Lăng Bác", "facts": ["bằng đá granite xám"]},
+                   {"name": "cảnh nền", "facts": ["hàng cây xanh", "hai bên quảng trường"]}],
+        "background": ["quảng trường Ba Đình", "rộng", "bầu trời trong xanh", "vài đám mây trắng"],
+        "style": {"photo": ["toàn cảnh"], "lighting": ["nắng sớm"]},
+        "medium": False,
+    },
+}
 
-    def build(self, level, seed="s"):
-        rng = random.Random(seed)
-        return s1b.build_subjson("img1", SAMPLE_TARGET, SAMPLE_DECOMP, level, rng)
 
-    def test_short_is_shallower_and_narrower_than_long(self):
-        short = self.build("short")
-        long_ = self.build("long")
-        self.assertLessEqual(len(short["groups"]), len(long_["groups"]))
-        self.assertLess(len(short["checklist"]), len(long_["checklist"]))
+def _copy(obj):
+    return json.loads(json.dumps(obj))
 
-    def test_cultural_group_always_kept_even_in_short(self):
-        short = self.build("short")
-        names = [g["name"] for g in short["groups"]]
-        self.assertIn("Lăng Bác", names)
 
-    def test_short_drops_background_but_long_keeps_it(self):
-        self.assertNotIn("boi_canh", self.build("short")["scene"])
-        self.assertIn("boi_canh", self.build("long")["scene"])
+class TestSubJsonSelection(unittest.TestCase):
+    """STEP 1b: LLM chọn, code chỉ dựng đầu vào, KIỂM TRA lựa chọn và lắp sub_json."""
 
-    def test_required_subject_from_filename_is_force_kept_even_if_not_main_or_cultural(self):
-        """Chốt chặn cho ý user: tên file (vd 'ruoc_kieu_002128') là tín hiệu ĐỘC LẬP
-        cho chủ thể chính -- nếu step1a lỡ xếp salience sai (nhóm khớp filename
-        không phải group 0, không cultural, không chứa chữ), nhóm đó vẫn PHẢI được
-        giữ ở short, không được loại theo ngân sách bề rộng thông thường."""
-        target = {
-            "high_level_description": "Một cảnh đông người.",
-            "style_description": {"medium": "photograph", "photo": "wide"},
-            "compositional_deconstruction": {
-                "background": "Đường phố.",
-                "elements": [{"id": i, "type": "obj", "desc": "d"} for i in range(4)],
-            },
-        }
-        decomp = {
-            "concept_groups": [
-                {"name": "đám đông xem hội", "member_ids": [0], "cardinality": "vague",
-                 "cultural": False},
-                {"name": "cờ trang trí", "member_ids": [1], "cardinality": "vague",
-                 "cultural": False},
-                # Nhóm khớp filename "ruoc_kieu" -- không phải group 0, không cultural.
-                {"name": "đám rước kiệu", "member_ids": [2], "cardinality": "vague",
-                 "cultural": False},
-                {"name": "cảnh nền", "member_ids": [3], "cardinality": "vague",
-                 "cultural": False},
-            ],
-            "facts": {
-                "0": [{"rank": 0, "kind": "subject", "text": "đám đông"}],
-                "1": [{"rank": 0, "kind": "subject", "text": "lá cờ"}],
-                "2": [{"rank": 0, "kind": "subject", "text": "đám rước kiệu"}],
-                "3": [{"rank": 0, "kind": "subject", "text": "hàng cây"}],
-            },
-        }
-        short = s1b.build_subjson("ruoc_kieu_002128", target, decomp, "short",
-                                  random.Random("s"))
-        names = [g["name"] for g in short["groups"]]
-        self.assertIn("đám rước kiệu", names)
-        self.assertEqual(short["required_subject"], "đám rước kiệu")
-        self.assertIn("đám rước kiệu", short["checklist"])
+    def sel_input(self, row_id="img1", decomp=None):
+        decomp = decomp or SAMPLE_DECOMP
+        index = subjson.find_required_group_index(decomp["concept_groups"], row_id)
+        return subjson.build_selection_input(SAMPLE_TARGET, decomp, index)
 
-    def test_required_subject_is_none_when_filename_does_not_match_any_group(self):
-        sub = s1b.build_subjson("img1", SAMPLE_TARGET, SAMPLE_DECOMP, "short",
-                                random.Random("s"))
-        self.assertIsNone(sub["required_subject"])
+    def errors(self, selection, row_id="img1"):
+        return subjson.validate_selection(selection, self.sel_input(row_id))
 
-    def test_catchall_group_with_one_text_element_is_trimmed_to_that_element(self):
-        """Chốt chặn cho bug thật (server test_3): 'cảnh nền' gom 13 element không
-        liên quan, tình cờ chứa 1 element chữ (biển hiệu) -- giữ nguyên CẢ nhóm chỉ
-        vì có chữ khiến short/medium phình to. Phải CHỈ giữ đúng element chữ đó."""
-        target = {
-            "high_level_description": "Một cảnh chợ.",
-            "style_description": {"medium": "photograph", "photo": "wide"},
-            "compositional_deconstruction": {
-                "background": "Chợ.",
-                "elements": (
-                    [{"id": 0, "type": "obj", "desc": "Chủ thể chính."}]
-                    + [{"id": i, "type": "obj", "desc": "Vật nền {}.".format(i)}
-                      for i in range(1, 6)]
-                    + [{"id": 6, "type": "text", "text": "ABC", "desc": "Biển hiệu chữ ABC."}]
-                ),
-            },
-        }
-        decomp = {
-            "concept_groups": [
-                {"name": "chủ thể chính", "member_ids": [0], "cardinality": "exact:1", "cultural": False},
-                {"name": "cảnh nền", "member_ids": [1, 2, 3, 4, 5, 6], "cardinality": "vague", "cultural": False},
-            ],
-            "facts": {
-                "0": [{"rank": 0, "kind": "subject", "text": "chủ thể chính"}],
-                **{str(i): [{"rank": 0, "kind": "subject", "text": "vật nền {}".format(i)},
-                           {"rank": 1, "kind": "attribute", "text": "chi tiết {}".format(i)}]
-                  for i in range(1, 6)},
-                "6": [{"rank": 0, "kind": "subject", "text": "biển hiệu ABC"},
-                      {"rank": 1, "kind": "color", "text": "chữ đen"}],
-            },
-        }
-        sub = s1b.build_subjson("x", target, decomp, "short", random.Random("s"))
-        bg = next(g for g in sub["groups"] if g["name"] == "cảnh nền")
-        self.assertIn("biển hiệu ABC", bg["facts"])
-        for i in range(1, 6):
-            self.assertNotIn("vật nền {}".format(i), bg["facts"],
-                             "kéo theo vật nền không liên quan chỉ vì nhóm có chữ")
+    # --- dựng đầu vào -------------------------------------------------------
 
-    def test_exact_cardinality_emits_count_constraint(self):
-        checklist = self.build("long")["checklist"]
-        self.assertTrue(any(c.startswith("số lượng: 3") for c in checklist))
+    def test_input_keeps_every_fact_background_and_style(self):
+        inp = self.sel_input()
+        by_name = {g["name"]: g for g in inp["groups"]}
+        self.assertEqual(len(by_name["nhóm bạn"]["elements"]), 3)
+        self.assertEqual(inp["background"],
+                         [f["text"] for f in SAMPLE_DECOMP["background_facts"]])
+        self.assertEqual(set(inp["style"]), {"photo", "lighting", "aesthetics"})
+        self.assertEqual(inp["medium"], "photograph")
 
-    def test_vague_cardinality_never_emits_count_constraint(self):
-        # "cảnh nền" là vague — không được sinh ra ràng buộc số lượng cho nó
-        for level in ("short", "medium", "long"):
-            for c in self.build(level)["checklist"]:
-                self.assertNotIn("cảnh nền", c.replace("số lượng: ", "")) if c.startswith(
-                    "số lượng:") else None
+    def test_count_fact_only_for_exact_two_or_more(self):
+        self.assertEqual(subjson.count_fact("exact:3"), "số lượng: 3")
+        self.assertIsNone(subjson.count_fact("exact:1"))
+        self.assertIsNone(subjson.count_fact("vague"))
+        by_name = {g["name"]: g for g in self.sel_input()["groups"]}
+        self.assertEqual(by_name["nhóm bạn"].get("so_luong"), "số lượng: 3")
+        self.assertNotIn("so_luong", by_name["Lăng Bác"])
 
-    def test_collective_noun_group_name_suppresses_count_constraint(self):
-        """Chốt chặn cho bug thật (server test_6): tên nhóm là danh từ tập hợp/cặp
-        (vd 'đôi đũa', 'đôi bàn tay') đã tự mang nghĩa 'một cặp' -- ghép thêm số n
-        (đếm số member nguyên tử) phía trước sẽ ra khẳng định số lượng SAI
-        ('đôi đũa' + n=2 -> 'số lượng: 2 đôi đũa' = 4 chiếc, trong khi ảnh chỉ có
-        1 đôi/2 chiếc). Không ai đặt hàng ảnh lại nói câu này, và nó còn sai."""
-        target = {
-            "high_level_description": "x",
-            "style_description": {"medium": "photograph", "photo": "wide"},
-            "compositional_deconstruction": {"background": "", "elements": [
-                {"id": 0, "type": "obj", "desc": "a"},
-                {"id": 1, "type": "obj", "desc": "b"},
-            ]},
-        }
-        decomp = {
-            "concept_groups": [
-                {"name": "đôi đũa", "member_ids": [0, 1],
-                 "cardinality": "exact:2", "cultural": True},
-            ],
-            "facts": {
-                "0": [{"rank": 0, "kind": "subject", "text": "chiếc đũa"}],
-                "1": [{"rank": 0, "kind": "subject", "text": "chiếc đũa"}],
-            },
-        }
-        sub = s1b.build_subjson("x", target, decomp, "long", random.Random("s"))
-        for c in sub["checklist"]:
-            self.assertFalse(c.startswith("số lượng:"), c)
+    def test_orphan_element_becomes_its_own_group(self):
+        decomp = _copy(SAMPLE_DECOMP)
+        decomp["concept_groups"] = [g for g in decomp["concept_groups"] if g["name"] != "cảnh nền"]
+        names = [g["name"] for g in self.sel_input(decomp=decomp)["groups"]]
+        self.assertIn("hàng cây xanh", names)
 
-    def test_group_with_many_members_is_capped_in_short(self):
-        """Chốt chặn cho bug thật (server test_3): nhóm chính nhiều thành viên
-        (vd '3 người trên thuyền') từng gộp hết vào short, ra hàng chục mệnh đề
-        cho một mức lẽ ra chỉ 8-20 từ."""
-        target = {
-            "high_level_description": "Năm người bạn.",
-            "style_description": {"medium": "photograph", "photo": "wide"},
-            "compositional_deconstruction": {
-                "background": "Nền.",
-                "elements": [{"id": i, "type": "obj", "desc": "Người thứ {}.".format(i)}
-                            for i in range(5)],
-            },
-        }
-        decomp = {
-            "concept_groups": [{"name": "nhóm bạn", "member_ids": [0, 1, 2, 3, 4],
-                                "cardinality": "exact:5", "cultural": False}],
-            "facts": {str(i): [{"rank": 0, "kind": "subject", "text": "người {}".format(i)},
-                               {"rank": 1, "kind": "attribute", "text": "đặc điểm {}".format(i)}]
-                     for i in range(5)},
-        }
-        short = s1b.build_subjson("x", target, decomp, "short", random.Random("s"))
-        long_ = s1b.build_subjson("x", target, decomp, "long", random.Random("s"))
-        self.assertLess(len(short["groups"][0]["facts"]), len(long_["groups"][0]["facts"]))
-        # short chỉ được giữ vài người, không phải cả 5
-        n_subjects_short = sum(1 for f in short["groups"][0]["facts"] if f.startswith("người "))
-        self.assertLess(n_subjects_short, 5)
+    def test_duplicate_group_names_are_disambiguated(self):
+        decomp = _copy(SAMPLE_DECOMP)
+        decomp["concept_groups"][2]["name"] = "nhóm bạn"
+        names = [g["name"] for g in self.sel_input(decomp=decomp)["groups"]]
+        self.assertEqual(names.count("nhóm bạn"), 1)
+        self.assertIn("nhóm bạn [2]", names)
+        self.assertEqual(subjson.original_name("nhóm bạn [2]"), "nhóm bạn")
 
-    def test_checklist_word_count_never_exceeds_level_budget(self):
-        """Chốt chặn cho bug thật (server test_6): checklist short/medium từng đòi
-        hỏi nhiều từ hơn hẳn length_hint cho phép (p90 short cần ~30 từ cho ngân
-        sách 8-20 từ) -- mâu thuẫn trực tiếp với luật 'PHẢI ĐẦY ĐỦ' ở STEP2A_SYSTEM,
-        vì bản thân checklist đưa ra đã không thể nói hết trong khoảng từ cho phép."""
-        target = {
-            "high_level_description": "x",
-            "style_description": {"medium": "photograph",
-                                  "photo": "high-angle wide shot, deep focus",
-                                  "lighting": "bright warm afternoon sunlight"},
-            "compositional_deconstruction": {
-                "background": "Một khung cảnh rất dài dòng nhiều chi tiết mô tả.",
-                "elements": [{"id": i, "type": "obj", "desc": "Vật thể số {}.".format(i)}
-                            for i in range(12)],
-            },
-        }
-        decomp = {
-            "concept_groups": [
-                {"name": "nhóm {}".format(g), "member_ids": [g * 2, g * 2 + 1],
-                 "cardinality": "exact:2", "cultural": (g % 3 == 0)}
-                for g in range(6)
-            ],
-            "facts": {
-                str(i): [
-                    {"rank": 0, "kind": "subject", "text": "vật thể số {} rất dài".format(i)},
-                    {"rank": 1, "kind": "color", "text": "màu sắc đặc trưng số {}".format(i)},
-                    {"rank": 2, "kind": "material", "text": "chất liệu chi tiết số {}".format(i)},
-                ]
-                for i in range(12)
-            },
-        }
-        budgets = {"short": 16, "medium": 50}
-        for level, budget in budgets.items():
-            sub = s1b.build_subjson("x", target, decomp, level, random.Random("s"))
-            n_words = sum(len(c.split()) for c in sub["checklist"])
-            self.assertLessEqual(n_words, budget,
-                                 "{}: checklist {} từ, vượt trần {}".format(
-                                     level, n_words, budget))
+    def test_required_subject_from_filename(self):
+        self.assertEqual(self.sel_input("lang_bac_000123")["required_subject"], "Lăng Bác")
+        self.assertIsNone(self.sel_input("img1")["required_subject"])
 
-    def test_word_budget_trim_keeps_at_least_one_fact_per_group(self):
-        checklist_budget_target = {
-            "high_level_description": "x",
-            "style_description": {"medium": "photograph", "photo": "wide"},
-            "compositional_deconstruction": {"background": "", "elements": [
-                {"id": i, "type": "obj", "desc": "d"} for i in range(6)]},
-        }
-        decomp = {
-            "concept_groups": [
-                {"name": "nhóm {}".format(g), "member_ids": [g], "cardinality": "vague",
-                 "cultural": False}
-                for g in range(6)
-            ],
-            "facts": {str(i): [{"rank": 0, "kind": "subject",
-                                "text": "chủ thể dài dòng nhiều từ số {}".format(i)}]
-                     for i in range(6)},
-        }
-        sub = s1b.build_subjson("x", checklist_budget_target, decomp, "short",
-                                random.Random("s"))
-        for g in sub["groups"]:
-            self.assertGreaterEqual(len(g["facts"]), 1)
+    # --- kiểm tra lựa chọn ----------------------------------------------------
 
-    def test_word_budget_trim_keeps_groups_and_scene_in_sync_with_checklist(self):
-        """Sau khi trim, checklist PHẢI khớp đúng với những gì thực sự đưa cho 2a
-        viết (groups[].facts + scene) -- lặp lại việc tách rời hai thứ này chính là
-        bug 'thiếu scene trong checklist' đã sửa trước đó."""
-        target = {
-            "high_level_description": "x",
-            "style_description": {"medium": "photograph",
-                                  "photo": "high-angle wide shot, deep focus",
-                                  "lighting": "bright warm afternoon sunlight"},
-            "compositional_deconstruction": {"background": "", "elements": [
-                {"id": i, "type": "obj", "desc": "d"} for i in range(6)]},
-        }
-        decomp = {
-            "concept_groups": [
-                {"name": "nhóm {}".format(g), "member_ids": [g], "cardinality": "vague",
-                 "cultural": False}
-                for g in range(6)
-            ],
-            "facts": {str(i): [{"rank": 0, "kind": "subject",
-                                "text": "chủ thể dài dòng nhiều từ số {}".format(i)}]
-                     for i in range(6)},
-        }
-        sub = s1b.build_subjson("x", target, decomp, "short", random.Random("s"))
-        flat = [f for g in sub["groups"] for f in g["facts"]]
-        flat += [v for k, v in sub["scene"].items() if v and k != "khong_khi"]
-        self.assertEqual(sorted(flat), sorted(
-            [c for c in sub["checklist"] if not c.startswith("số lượng")]))
+    def test_accepts_good_selection(self):
+        self.assertEqual(self.errors(GOOD_SELECTION), [])
 
-    def test_too_many_cultural_groups_are_capped_in_short(self):
-        """Chốt chặn cho bug thật (server test_3): 4 nhóm cùng cultural=True (vd 4
-        món trong 1 mâm cỗ) từng ĐỀU bị ép giữ ở short, phá vỡ ngân sách 8-20 từ."""
-        target = {
-            "high_level_description": "Mâm cỗ.",
-            "style_description": {"medium": "photograph", "photo": "wide"},
-            "compositional_deconstruction": {
-                "background": "Bàn gỗ.",
-                "elements": [{"id": i, "type": "obj", "desc": "Món {}.".format(i)}
-                            for i in range(4)],
-            },
-        }
-        decomp = {
-            "concept_groups": [
-                {"name": "món {}".format(i), "member_ids": [i],
-                 "cardinality": "exact:1", "cultural": True}
-                for i in range(4)
-            ],
-            "facts": {str(i): [{"rank": 0, "kind": "subject", "text": "món {}".format(i)}]
-                     for i in range(4)},
-        }
-        short = s1b.build_subjson("x", target, decomp, "short", random.Random("s"))
-        long_ = s1b.build_subjson("x", target, decomp, "long", random.Random("s"))
-        self.assertLess(len(short["groups"]), 4, "vẫn giữ cả 4 nhóm cultural ở short")
-        self.assertEqual(len(long_["groups"]), 4, "long không nên bị giới hạn số nhóm cultural")
+    def test_rejects_rewritten_fact(self):
+        bad = _copy(GOOD_SELECTION)
+        bad["long"]["groups"][0]["facts"].append("cô gái mặc áo dài")
+        self.assertTrue(any("nguyên văn" in e for e in self.errors(bad)))
 
-    def test_depth_axis_actually_cuts_facts(self):
-        """Chốt chặn cho lỗi thiết kế cũ: chỉ cắt bề rộng là chưa đủ."""
-        short = self.build("short")
-        group = next(g for g in short["groups"] if g["name"] == "nhóm bạn")
-        # 3 element × 3 mệnh đề = 9; mức short phải cắt còn ít hơn hẳn
-        self.assertLess(len(group["facts"]), 9)
+    def test_rejects_unknown_group(self):
+        bad = _copy(GOOD_SELECTION)
+        bad["long"]["groups"].append({"name": "con chó", "facts": []})
+        self.assertTrue(any("không có trong đầu vào" in e for e in self.errors(bad)))
 
-    def test_is_deterministic_for_same_seed(self):
-        a = s1b.build_subjson("img1", SAMPLE_TARGET, SAMPLE_DECOMP, "long", random.Random("k"))
-        b = s1b.build_subjson("img1", SAMPLE_TARGET, SAMPLE_DECOMP, "long", random.Random("k"))
-        self.assertEqual(a, b)
+    def test_rejects_missing_level(self):
+        bad = _copy(GOOD_SELECTION)
+        del bad["medium"]
+        self.assertTrue(any("thiếu mức 'medium'" in e for e in self.errors(bad)))
 
-    def test_checklist_is_flattened_group_facts(self):
-        sub = self.build("medium")
-        flat = [f for g in sub["groups"] for f in g["facts"]]
-        for fact in flat:
-            self.assertIn(fact, sub["checklist"])
+    def test_rejects_nesting_violation(self):
+        bad = _copy(GOOD_SELECTION)
+        bad["medium"]["groups"][0]["facts"].remove("cô gái")
+        self.assertTrue(any("lồng nhau" in e for e in self.errors(bad)))
 
-    def test_checklist_includes_scene_values(self):
-        """Chốt chặn cho bug thật: 2a được cấp scene để viết prompt, nên checklist ở
-        2b PHẢI chứa scene — thiếu nó thì mọi câu tả ánh sáng/bối cảnh bị chấm oan
-        là 'thêm tin' dù model chỉ đang tả đúng phần được cấp.
+    def test_rejects_short_with_style(self):
+        bad = _copy(GOOD_SELECTION)
+        bad["short"]["style"] = {"photo": ["toàn cảnh"]}
+        self.assertTrue(any("short: không được chọn 'style'" in e for e in self.errors(bad)))
 
-        NGOẠI LỆ: khong_khi (aesthetics) chỉ là gợi ý văn phong cho 2a, không bắt
-        buộc trong checklist chấm điểm của 2b (xem test_khong_khi_is_hint_only_...)."""
-        for level in ("short", "medium", "long"):
-            sub = self.build(level)
-            for key, value in sub["scene"].items():
-                if value and key != "khong_khi":
-                    self.assertIn(value, sub["checklist"],
-                                 "{}: thiếu '{}' trong checklist".format(level, value))
+    def test_rejects_short_with_too_many_ideas(self):
+        bad = _copy(GOOD_SELECTION)
+        bad["short"]["groups"][0]["facts"].append("mặc áo dài trắng")
+        self.assertTrue(any("ý ngoài chủ thể chính" in e for e in self.errors(bad)))
 
-    def test_khong_khi_is_hint_only_not_in_checklist(self):
-        """Chốt chặn cho bug thật (server test_6): aesthetics là danh sách tag mood
-        tiếng Anh rời rạc (vd 'elegant, historical, serene'), không phải câu mô tả
-        -- bắt buộc trong checklist gây 71% prompt long bị loại oan. Giữ làm gợi ý
-        cho 2a viết nhưng KHÔNG chấm điểm ở 2b."""
-        sub = self.build("long")
-        self.assertIn("khong_khi", sub["scene"])
-        self.assertNotIn(sub["scene"]["khong_khi"], sub["checklist"])
+    def test_short_may_take_one_location_from_background(self):
+        good = _copy(GOOD_SELECTION)
+        good["short"] = {"groups": [{"name": "nhóm bạn", "facts": ["nam thanh niên", "cô gái"]}],
+                         "background": ["quảng trường Ba Đình"], "style": {}, "medium": False}
+        self.assertEqual(self.errors(good), [])
 
-    def test_khong_khi_keeps_only_first_tag(self):
-        target = dict(SAMPLE_TARGET)
-        target["style_description"] = dict(SAMPLE_TARGET["style_description"])
-        target["style_description"]["aesthetics"] = "elegant, historical, serene"
-        scene = s1b.build_scene(target, "long")
-        self.assertEqual(scene["khong_khi"], "elegant")
+    def test_rejects_word_cap_exceeded(self):
+        with mock.patch.dict(subjson.MAX_CHECKLIST_WORDS, {"short": 5}):
+            self.assertTrue(any("vượt trần" in e for e in self.errors(GOOD_SELECTION)))
 
-    def test_first_clause_does_not_leave_dangling_preposition(self):
-        """Chốt chặn cho bug thật (server test_6): cắt cứng theo số từ từng để lại
-        cụm cụt lửng ('...on the'), không ai viết prompt lại chèn một câu bị cắt
-        cụt như vậy."""
-        text = ("A dark interior space framed by a heavy brown wooden door frame "
-                "on the left")
-        clause = s1b.first_clause(text, 14)
-        self.assertFalse(clause.split()[-1].lower() in s1b._DANGLING_TAIL_WORDS)
-        self.assertEqual(clause, "A dark interior space framed by a heavy brown wooden door frame")
+    def test_rejects_missing_required_subject(self):
+        bad = _copy(GOOD_SELECTION)
+        bad["short"]["groups"] = [bad["short"]["groups"][0]]
+        errors = self.errors(bad, row_id="lang_bac_000123")
+        self.assertTrue(any("short: thiếu nhóm chủ thể bắt buộc" in e for e in errors))
 
-    def test_default_medium_photograph_excluded_from_scene(self):
-        """Chốt chặn cho bug thật (server test_5): medium=='photograph' chiếm 994/1000
-        mẫu -- gần như hằng số, không mang thông tin phân biệt. Bắt buộc checklist
-        phải có 'photograph' khiến 44/98 lượt loại ở test_5 là oan (model không sai,
-        chỉ đơn giản không ai đặt hàng ảnh lại nói 'đây là một bức ảnh')."""
-        target = dict(SAMPLE_TARGET)
-        target["style_description"] = dict(SAMPLE_TARGET["style_description"])
-        target["style_description"]["medium"] = "photograph"
-        target["style_description"]["photo"] = "eye-level medium shot, sharp focus"
-        scene = s1b.build_scene(target, "long")
-        self.assertNotIn("loai_anh", scene)
+    def test_rejects_label_group_without_facts(self):
+        bad = _copy(GOOD_SELECTION)
+        bad["long"]["groups"][2]["facts"] = []
+        self.assertTrue(any("không có mệnh đề nào" in e for e in self.errors(bad)))
 
-    def test_non_default_medium_kept_in_scene(self):
-        target = dict(SAMPLE_TARGET)
-        target["style_description"] = dict(SAMPLE_TARGET["style_description"])
-        target["style_description"]["medium"] = "illustration"
-        scene = s1b.build_scene(target, "long")
-        self.assertEqual(scene.get("loai_anh"), "illustration")
+    # --- lắp sub_json ---------------------------------------------------------
 
-    def test_default_camera_angle_excluded_from_scene(self):
-        """Chốt chặn cho bug thật (server test_5): 'eye-level medium shot' là góc máy
-        mặc định của phần lớn ảnh -- STEP2A_SYSTEM cấm dùng ngôn ngữ kỹ thuật khung
-        hình nên model đúng khi bỏ qua, nhưng checklist cũ vẫn bắt phải nhắc tới,
-        gây loại oan hàng loạt."""
-        target = dict(SAMPLE_TARGET)
-        target["style_description"] = dict(SAMPLE_TARGET["style_description"])
-        target["style_description"]["photo"] = "eye-level medium shot, sharp focus on the subject"
-        scene = s1b.build_scene(target, "long")
-        self.assertNotIn("goc_chup", scene)
+    def assemble(self, level, row_id="img1", selection=None):
+        return subjson.assemble_subjson(row_id, self.sel_input(row_id),
+                                        selection or GOOD_SELECTION, level)
 
-    def test_notable_camera_angle_kept_in_scene(self):
-        target = dict(SAMPLE_TARGET)
-        target["style_description"] = dict(SAMPLE_TARGET["style_description"])
-        target["style_description"]["photo"] = "high-angle wide shot, deep focus"
-        scene = s1b.build_scene(target, "long")
-        self.assertIn("high-angle", scene.get("goc_chup", ""))
+    def test_checklist_is_exactly_what_2a_is_given(self):
+        persona = {"vai": "v", "giọng": "g", "ngôn ngữ": "n"}
+        for level in subjson.LEVELS:
+            sub = self.assemble(level)
+            spec = s2a.build_spec(sub, persona)
+            given = [f for g in spec["groups"] for f in g["facts"]]
+            given += spec.get("boi_canh", []) + spec.get("phong_cach", [])
+            self.assertEqual(given, sub["checklist"], level)
 
-    def test_boring_eye_level_stripped_from_notable_angle_clause(self):
-        """Chốt chặn cho bug thật (server test_6): dữ liệu gốc không nhất quán --
-        có ảnh viết 'eye-level wide shot' dính liền (không dấu phẩy tách). Nếu giữ
-        nguyên cả cụm thì 'eye-level' (mặc định, bị STEP2A_SYSTEM cấm) vẫn lọt vào
-        checklist cùng từ khoá đáng chú ý, khiến model đúng luật (bỏ qua) nhưng bị
-        chấm oan là thiếu 'eye-level wide shot'."""
-        target = dict(SAMPLE_TARGET)
-        target["style_description"] = dict(SAMPLE_TARGET["style_description"])
-        target["style_description"]["photo"] = "eye-level wide shot, deep focus"
-        scene = s1b.build_scene(target, "long")
-        self.assertEqual(scene.get("goc_chup"), "wide shot")
+    def test_cultural_name_is_checklist_item_but_label_is_not(self):
+        checklist = self.assemble("long")["checklist"]
+        self.assertIn("Lăng Bác", checklist)
+        self.assertNotIn("cảnh nền", checklist)
+        self.assertNotIn("nhóm bạn", checklist)
 
-    def test_duplicate_rank0_subjects_are_not_dropped_across_members(self):
-        """Chốt chặn cho bug thật (server test_3): 2 người phụ nữ trong cùng một
-        nhóm cùng bắt đầu bằng 'người phụ nữ' -- dedup toàn nhóm từng xoá mất
-        chủ ngữ người thứ hai, khiến model tự suy luận đúng theo cardinality
-        nhưng bị 2b chấm oan là 'thêm tin' vì checklist không còn dấu vết."""
-        target = {
-            "high_level_description": "Ba du khách trên thuyền.",
-            "style_description": {"medium": "photograph", "photo": "wide"},
-            "compositional_deconstruction": {
-                "background": "Sông nước.",
-                "elements": [
-                    {"id": 0, "type": "obj", "desc": "Người đàn ông tóc đen."},
-                    {"id": 1, "type": "obj", "desc": "Người phụ nữ tóc vàng buộc sau."},
-                    {"id": 2, "type": "obj", "desc": "Người phụ nữ tóc vàng khác."},
-                ],
-            },
-        }
-        decomp = {
-            "concept_groups": [{"name": "nhóm du khách", "member_ids": [0, 1, 2],
-                                "cardinality": "exact:3", "cultural": False}],
-            "facts": {
-                "0": [{"rank": 0, "kind": "subject", "text": "người đàn ông"},
-                      {"rank": 1, "kind": "color", "text": "tóc đen"}],
-                "1": [{"rank": 0, "kind": "subject", "text": "người phụ nữ"},
-                      {"rank": 1, "kind": "attribute", "text": "tóc vàng buộc sau"}],
-                "2": [{"rank": 0, "kind": "subject", "text": "người phụ nữ"},
-                      {"rank": 1, "kind": "attribute", "text": "tóc vàng khác"}],
-            },
-        }
-        sub = s1b.build_subjson("x", target, decomp, "long", random.Random("s"))
-        facts = sub["groups"][0]["facts"]
-        self.assertEqual(facts.count("người phụ nữ"), 2,
-                         "chủ ngữ người phụ nữ thứ hai bị xoá mất: {}".format(facts))
-        self.assertIn("tóc vàng khác", facts)
+    def test_so_nhieu_only_when_plural_without_count(self):
+        groups = {g["name"]: g for g in self.assemble("short")["groups"]}
+        self.assertFalse(groups["nhóm bạn"]["so_nhieu"])
+        self.assertFalse(groups["Lăng Bác"]["so_nhieu"])
+        no_count = _copy(GOOD_SELECTION)
+        for level in subjson.LEVELS:
+            no_count[level]["groups"][0]["facts"].remove("số lượng: 3")
+        groups = {g["name"]: g for g in self.assemble("short", selection=no_count)["groups"]}
+        self.assertTrue(groups["nhóm bạn"]["so_nhieu"])
 
-    def test_cultural_group_name_in_checklist_even_with_facts(self):
-        """Chốt chặn cho bug thật (server test_3): tên nhóm văn hoá trước đây chỉ
-        được thêm vào checklist khi nhóm KHÔNG có facts nào. 'thanh đồng trong lễ
-        Hầu đồng' có 8 facts (áo, mũ, quạt...) nên tên nhóm bị bỏ sót hoàn toàn,
-        khiến model viết đúng tên văn hoá vẫn bị 2b chấm là 'thêm tin'."""
-        target = {
-            "high_level_description": "Một thanh đồng trong lễ Hầu đồng.",
-            "style_description": {"medium": "photograph", "photo": "wide"},
-            "compositional_deconstruction": {
-                "background": "Đền thờ.",
-                "elements": [{"id": 0, "type": "obj", "desc": "Áo thụng lụa xanh."}],
-            },
-        }
-        decomp = {
-            "concept_groups": [{"name": "thanh đồng trong lễ Hầu đồng", "member_ids": [0],
-                                "cardinality": "exact:1", "cultural": True}],
-            "facts": {"0": [{"rank": 0, "kind": "subject", "text": "áo thụng lụa xanh"}]},
-        }
-        sub = s1b.build_subjson("x", target, decomp, "long", random.Random("s"))
-        self.assertIn("thanh đồng trong lễ Hầu đồng", sub["checklist"])
+    def test_required_subject_points_to_checklist_item(self):
+        sub = self.assemble("short", row_id="lang_bac_000123")
+        self.assertEqual(sub["required_subject"], "Lăng Bác")
+        self.assertIn(sub["required_subject"], sub["checklist"])
 
-    def test_first_clause_compression(self):
-        self.assertEqual(
-            s1b.first_clause("Quảng trường Ba Đình rộng; bầu trời trong xanh"),
-            "Quảng trường Ba Đình rộng",
-        )
-        self.assertEqual(s1b.first_clause("a b c d e f", max_words=3), "a b c")
+    def test_length_hint_per_level(self):
+        self.assertEqual(self.assemble("short")["length_hint"], "8-20 từ")
+        self.assertEqual(self.assemble("long")["length_hint"], "100-200 từ")
+
+    # --- cache ---------------------------------------------------------------
+
+    def test_fingerprint_changes_when_input_changes(self):
+        inp = self.sel_input()
+        changed = _copy(inp)
+        changed["background"].append("thêm")
+        self.assertNotEqual(s1b.fingerprint(inp), s1b.fingerprint(changed))
+        self.assertEqual(s1b.fingerprint(inp), s1b.fingerprint(_copy(inp)))
+
+    def test_cached_selection_rejects_stale_fingerprint(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "x.json"
+            io_utils.write_json(path, {"fingerprint": "abc", "selection": GOOD_SELECTION})
+            self.assertIsNone(s1b.cached_selection(path, "khác"))
+            self.assertEqual(s1b.cached_selection(path, "abc"), GOOD_SELECTION)
 
 
 # =============================================================================
@@ -697,10 +584,13 @@ class TestVerbalize(unittest.TestCase):
         self.assertEqual(s2a.clean_prompt_text("“Ảnh đẹp”"), "Ảnh đẹp")
 
     def test_spec_only_exposes_subjson_content(self):
-        sub = s1b.build_subjson("i", SAMPLE_TARGET, SAMPLE_DECOMP, "short", random.Random("x"))
+        sel_input = subjson.build_selection_input(SAMPLE_TARGET, SAMPLE_DECOMP)
+        sub = subjson.assemble_subjson("i", sel_input, GOOD_SELECTION, "long")
         spec = s2a.build_spec(sub, {"vai": "v", "giọng": "g", "ngôn ngữ": "n"})
-        # Không được rò rỉ target_json hay checklist đầy đủ vào prompt của model
-        self.assertNotIn("target_json", json.dumps(spec, ensure_ascii=False))
+        blob = json.dumps(spec, ensure_ascii=False)
+        # Không rò rỉ target_json, cũng không rò rỉ nhãn nhóm (2b sẽ chấm là thêm tin)
+        self.assertNotIn("target_json", blob)
+        self.assertNotIn("cảnh nền", blob)
         self.assertEqual(len(spec["groups"]), len(sub["groups"]))
 
 
@@ -914,9 +804,29 @@ class TestPrompts(unittest.TestCase):
         )
         self.assertEqual(errors, [])
 
+    def test_step1b_fewshot_output_is_valid_against_its_input(self):
+        """Ví dụ few-shot của 1b phải tự vượt qua chính bộ kiểm tra lựa chọn."""
+        self.assertEqual(subjson.validate_selection(
+            prompts.STEP1B_FEWSHOT_OUTPUT, prompts.STEP1B_FEWSHOT_INPUT), [])
+
+    def test_step1b_messages_have_fewshot(self):
+        messages = prompts.build_step1b_messages(prompts.STEP1B_FEWSHOT_INPUT)
+        self.assertEqual([m["role"] for m in messages], ["system", "user", "assistant", "user"])
+
+    def test_step1b_system_defines_levels_by_content_not_length(self):
+        text = prompts.STEP1B_SYSTEM
+        for phrase in ("ĐỘ PHỦ", "ĐỘ SÂU", "LOẠI THÔNG TIN", "SHORT", "MEDIUM", "LONG",
+                       "NGUYÊN VĂN", "LỒNG NHAU", "CÓ BẢN SẮC", "required_subject"):
+            self.assertIn(phrase, text)
+
+    def test_step1b_fix_message_lists_every_error(self):
+        message = prompts.build_step1b_fix_message(["lỗi A", "lỗi B"])
+        self.assertIn("lỗi A", message)
+        self.assertIn("lỗi B", message)
+
     def test_step2a_messages_alternate_roles(self):
         spec = {"detail_level": "short", "length_hint": "8-20 từ",
-                "persona": {}, "scene": "", "groups": []}
+                "persona": {}, "groups": []}
         messages = prompts.build_step2a_messages(spec)
         self.assertEqual(messages[0]["role"], "system")
         self.assertEqual(messages[-1]["role"], "user")
@@ -938,23 +848,28 @@ class TestPrompts(unittest.TestCase):
         self.assertIn("ĐẦY ĐỦ", text)
         self.assertIn("bỏ sót", text)
 
-    def test_step2a_fewshot_examples_fully_cover_their_own_scene(self):
-        """Few-shot phải LÀM MẪU đúng luật 'nhắc đủ mọi mệnh đề, kể cả scene' --
-        nếu ví dụ tự mâu thuẫn với luật thì model học sai theo ví dụ, bất kể luật
-        viết gì trong system prompt."""
-        stopwords = {"từ", "trên", "trong", "chụp", "và", "mặt"}
+    def test_step2a_fewshot_examples_fully_cover_their_own_facts(self):
+        """Few-shot phải LÀM MẪU đúng luật 'nhắc đủ mọi mệnh đề' -- nếu ví dụ tự mâu thuẫn
+        với luật thì model học sai theo ví dụ, bất kể system prompt viết gì."""
+        stopwords = {"từ", "trên", "trong", "chụp", "và", "mặt", "là", "những", "chiếc",
+                     "màu", "bằng", "đang", "một"}
         for spec, answer in prompts.STEP2A_FEWSHOT:
-            scene = spec.get("scene", "")
-            if not scene:
-                continue
+            items = [f for g in spec["groups"] for f in g["facts"]]
+            items += spec.get("boi_canh", []) + spec.get("phong_cach", [])
             answer_low = answer.lower()
-            for bit in scene.split(","):
-                bit = bit.strip().lower()
-                keywords = [w for w in bit.split() if w not in stopwords]
-                for kw in keywords:
-                    self.assertIn(kw, answer_low,
-                                 "few-shot {}: output không nhắc '{}' (từ scene "
-                                 "'{}')".format(spec["detail_level"], kw, bit))
+            for item in items:
+                if item.startswith("số lượng"):
+                    continue
+                for kw in [w for w in item.lower().split() if w not in stopwords]:
+                    self.assertIn(kw, answer_low, "few-shot {}: không nhắc '{}' (từ '{}')".format(
+                        spec["detail_level"], kw, item))
+
+    def test_step2a_fewshot_specs_use_build_spec_shape(self):
+        allowed = {"detail_level", "length_hint", "persona", "groups", "boi_canh", "phong_cach"}
+        for spec, _ in prompts.STEP2A_FEWSHOT:
+            self.assertLessEqual(set(spec), allowed)
+            for group in spec["groups"]:
+                self.assertLessEqual(set(group), {"facts", "so_nhieu"})
 
     def test_step2a_fewshot_lengths_match_their_level(self):
         bounds = {"short": (5, 25), "medium": (25, 70), "long": (55, 220)}
@@ -1081,8 +996,9 @@ class TestOutRoot(unittest.TestCase):
     def test_every_step_has_its_own_subdir(self):
         names = list(io_utils.STEP_DIRS.values())
         self.assertEqual(len(names), len(set(names)), "tên thư mục step bị trùng")
-        self.assertEqual(set(io_utils.STEP_DIRS),
-                         {"step0", "step1a", "step1b", "step2a", "step2b", "step2b2", "step2c"})
+        self.assertEqual(
+            set(io_utils.STEP_DIRS),
+            {"step0", "step1a", "step1b", "step2a", "step2b", "step2b2", "step2c", "step2d"})
 
     def test_step_dir_nests_under_out_root(self):
         self.assertEqual(str(io_utils.step_dir("test_1", "step0")), "test_1/step0_normalized")

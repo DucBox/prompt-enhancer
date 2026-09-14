@@ -11,7 +11,7 @@
 #   --test              Chạy thử trên một ít mẫu ngẫu nhiên
 #   --test_samples N    Số mẫu khi bật --test                           (mặc định: 20)
 #   --workers N         Số luồng gọi model song song                    (mặc định: 4)
-#   --from STEP         Bắt đầu từ step này: 0|1a|1b|2a|2b|2b2|2c       (mặc định: 0)
+#   --from STEP         Bắt đầu từ step này: 0|1a|1b|2a|2b|2b2|2c|2d    (mặc định: 0)
 #   --retry_rejected    Bật step 2b2: sửa lại (retry ĐÚNG 1 lần) prompt bị 2b loại
 #                        thay vì bỏ trắng. Mặc định TẮT -- không bật thì rejected.jsonl
 #                        của 2b vẫn là danh sách cuối cùng bị loại, y như trước.
@@ -62,7 +62,7 @@ fi
 
 ROOT=(--out_root "$OUT_DIR")
 
-STEP_ORDER=(0 1a 1b 2a 2b 2b2 2c)
+STEP_ORDER=(0 1a 1b 2a 2b 2b2 2c 2d)
 
 step_index() {   # step_index <step> -> vị trí trong STEP_ORDER, hoặc -1
   local i
@@ -103,8 +103,8 @@ if should_run 0;  then banner "STEP 0   chuẩn hoá & audit"
 if should_run 1a; then banner "STEP 1a  gom nhóm & phân rã mệnh đề  [gọi model]"
   python3 step1a_decompose.py "${ROOT[@]}" --workers "$WORKERS"; fi
 
-if should_run 1b; then banner "STEP 1b  nén 2 trục"
-  python3 step1b_build_subjson.py "${ROOT[@]}"; fi
+if should_run 1b; then banner "STEP 1b  chọn lọc short/medium/long  [gọi model]"
+  python3 step1b_build_subjson.py "${ROOT[@]}" --workers "$WORKERS"; fi
 
 if should_run 2a; then banner "STEP 2a  sinh user prompt  [gọi model]"
   python3 step2a_verbalize.py "${ROOT[@]}" --workers "$WORKERS"; fi
@@ -124,6 +124,9 @@ fi
 if should_run 2c; then banner "STEP 2c  chia tập"
   python3 step2c_split.py "${ROOT[@]}"; fi
 
+if should_run 2d; then banner "STEP 2d  chuẩn hoá nhãn Y về schema Ideogram 4"
+  python3 step2d_finalize.py "${ROOT[@]}"; fi
+
 ELAPSED=$(( $(date +%s) - START ))
 echo
 echo "================================================================"
@@ -131,5 +134,5 @@ echo "Xong sau ${ELAPSED}s. Cây đầu ra:"
 echo
 find "$OUT_DIR" -maxdepth 1 -mindepth 1 -type d | sort | sed 's/^/  /'
 echo
-echo "Dữ liệu huấn luyện: $OUT_DIR/step2c_split/{train,val,test}.jsonl"
+echo "Dữ liệu huấn luyện: $OUT_DIR/step2d_final/{train,val,test}.jsonl"
 echo "================================================================"

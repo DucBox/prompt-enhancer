@@ -20,6 +20,7 @@ STEP_DIRS = {
     "step2b": "step2b_filtered",
     "step2b2": "step2b2_corrected",
     "step2c": "step2c_split",
+    "step2d": "step2d_final",
 }
 
 

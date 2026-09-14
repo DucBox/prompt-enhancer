@@ -3,12 +3,21 @@
 
 Đầu vào : <out_root>/step0_normalized/targets.jsonl
 Đầu ra  : <out_root>/step1a_decompose/
-            decompose/<id>.json   {"concept_groups": [...], "facts": {...}}
+            decompose/<id>.json   {"concept_groups", "facts", "background_facts",
+                                   "style_facts", "field_priority"}
             decompose.jsonl       gộp lại thành một file
             failures.json
 
-Chạy một lần rồi CACHE: file <id>.json đã có thì bỏ qua, nên có thể dừng giữa chừng
-và chạy lại để tiếp tục. Sau bước này mọi việc sinh dữ liệu đều là code thuần.
+Phân rã ĐẦY ĐỦ mọi trường mang nội dung, mỗi mệnh đề một ý, bằng tiếng Việt, xếp hạng
+theo độ quan trọng TRONG TỪNG TRƯỜNG:
+    facts             <- elements[].desc
+    background_facts  <- compositional_deconstruction.background
+    style_facts       <- style_description.{photo | art_style, lighting, aesthetics}
+Không phân rã `medium` (enum) và `high_level_description` (chỉ làm ngữ cảnh xếp hạng).
+Bước này KHÔNG bỏ bớt thông tin -- chọn giữ/bỏ theo mức là việc của 1b.
+
+Chạy một lần rồi CACHE: file <id>.json đã có (và đúng schema hiện tại) thì bỏ qua,
+nên có thể dừng giữa chừng và chạy lại để tiếp tục.
 
 Ví dụ:
     python step1a_decompose.py --out_root test_1 --dry_run
@@ -18,7 +27,6 @@ Ví dụ:
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -28,6 +36,16 @@ STEP = "STEP 1a"
 
 VALID_KINDS = {"subject", "color", "material", "attribute", "action", "position", "count"}
 
+# Các trường style được phân rã. `medium` là enum nên không phân rã.
+STYLE_FACT_FIELDS = ("photo", "art_style", "lighting", "aesthetics")
+
+# Độ ưu tiên XUYÊN TRƯỜNG. Hiện chưa đánh giá nên mọi trường bằng nhau; sau này có thể
+# cho LLM chấm lại thành 2-3 mà không phải đổi schema.
+DEFAULT_FIELD_PRIORITY = 1
+
+# Cache sinh ra trước khi có các khoá này là schema cũ -- phải gọi lại, không dùng lẫn.
+CACHE_REQUIRED_KEYS = ("background_facts", "style_facts", "field_priority")
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="LLM gom nhóm & phân rã mệnh đề")
@@ -36,11 +54,27 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--temperature", type=float, default=0.0,
                    help="Để 0 cho deterministic — kết quả được cache và đóng băng")
-    p.add_argument("--max_tokens", type=int, default=4096)
+    p.add_argument("--max_tokens", type=int, default=8192)
     p.add_argument("--overwrite", action="store_true", help="Bỏ qua cache, gọi lại toàn bộ")
     p.add_argument("--dry_run", action="store_true",
                    help="Chỉ dựng messages và in ra, KHÔNG gọi model")
     return io_utils.add_common_args(p).parse_args()
+
+
+def expected_style_fields(target: Dict[str, Any]) -> List[str]:
+    style = target.get("style_description") or {}
+    return [f for f in STYLE_FACT_FIELDS if str(style.get(f) or "").strip()]
+
+
+def _check_ranked(items: Any, label: str, errors: List[str]) -> None:
+    if not isinstance(items, list) or not items:
+        errors.append("{} thiếu hoặc rỗng".format(label))
+        return
+    ranks = [f.get("rank") for f in items if isinstance(f, dict)]
+    if 0 not in ranks:
+        errors.append("{} không có mệnh đề rank 0".format(label))
+    if any(not isinstance(f, dict) or not str(f.get("text") or "").strip() for f in items):
+        errors.append("{} có mệnh đề thiếu text".format(label))
 
 
 def validate_decomposition(result: Any, target: Dict[str, Any]) -> List[str]:
@@ -78,26 +112,50 @@ def validate_decomposition(result: Any, target: Dict[str, Any]) -> List[str]:
             if unknown:
                 errors.append("concept_groups[{}] có id lạ: {}".format(i, unknown))
 
-    # Mọi element phải có mệnh đề, và mệnh đề rank 0 phải tồn tại.
     for element_id in element_ids:
         key = str(element_id)
-        item = facts.get(key)
-        if not isinstance(item, list) or not item:
-            errors.append("facts['{}'] thiếu hoặc rỗng".format(key))
-            continue
-        ranks = [f.get("rank") for f in item if isinstance(f, dict)]
-        if 0 not in ranks:
-            errors.append("facts['{}'] không có mệnh đề rank 0".format(key))
-        for f in item:
-            if not isinstance(f, dict) or not f.get("text"):
-                errors.append("facts['{}'] có mệnh đề thiếu text".format(key))
-                break
+        _check_ranked(facts.get(key), "facts['{}']".format(key), errors)
+
+    comp = target.get("compositional_deconstruction") or {}
+    if str(comp.get("background") or "").strip():
+        _check_ranked(result.get("background_facts"), "background_facts", errors)
+
+    expected = expected_style_fields(target)
+    style_facts = result.get("style_facts")
+    if expected:
+        if not isinstance(style_facts, dict):
+            errors.append("style_facts thiếu hoặc sai kiểu")
+        else:
+            for field in expected:
+                _check_ranked(style_facts.get(field), "style_facts['{}']".format(field), errors)
+            # Bắt nhầm photo <-> art_style, hoặc lỡ phân rã cả medium.
+            unexpected = sorted(set(style_facts) - set(expected))
+            if unexpected:
+                errors.append("style_facts có trường không có trong đầu vào: {}".format(unexpected))
 
     return errors
 
 
+def _clean_ranked(items: Any, with_kind: bool) -> List[Dict[str, Any]]:
+    cleaned = []
+    for f in items or []:
+        if not isinstance(f, dict) or not str(f.get("text") or "").strip():
+            continue
+        item: Dict[str, Any] = {"rank": int(f.get("rank", 99))}
+        if with_kind:
+            kind = f.get("kind")
+            item["kind"] = kind if kind in VALID_KINDS else "attribute"
+        item["text"] = str(f["text"]).strip()
+        cleaned.append(item)
+    cleaned.sort(key=lambda f: f["rank"])
+    # Đánh lại rank liên tục 0..n-1 để bước sau chọn theo thứ hạng cho chuẩn.
+    for new_rank, f in enumerate(cleaned):
+        f["rank"] = new_rank
+    return cleaned
+
+
 def normalize_decomposition(result: Dict[str, Any]) -> Dict[str, Any]:
-    """Sắp xếp lại cho ổn định và loại bỏ kind lạ."""
+    """Sắp xếp lại cho ổn định, loại kind lạ, gắn field_priority."""
     groups = []
     for group in result.get("concept_groups", []):
         groups.append({
@@ -107,25 +165,36 @@ def normalize_decomposition(result: Dict[str, Any]) -> Dict[str, Any]:
             "cultural": bool(group.get("cultural", False)),
         })
 
-    facts: Dict[str, List[Dict[str, Any]]] = {}
-    for key, items in result.get("facts", {}).items():
-        cleaned = []
-        for f in items:
-            if not isinstance(f, dict) or not f.get("text"):
-                continue
-            kind = f.get("kind")
-            cleaned.append({
-                "rank": int(f.get("rank", 99)),
-                "kind": kind if kind in VALID_KINDS else "attribute",
-                "text": str(f["text"]).strip(),
-            })
-        cleaned.sort(key=lambda f: f["rank"])
-        # Đánh lại rank liên tục 0..n-1 để bước 1b cắt theo ngưỡng cho chuẩn.
-        for new_rank, f in enumerate(cleaned):
-            f["rank"] = new_rank
-        facts[str(key)] = cleaned
+    facts = {str(key): _clean_ranked(items, with_kind=True)
+             for key, items in (result.get("facts") or {}).items()}
+    background_facts = _clean_ranked(result.get("background_facts"), with_kind=True)
+    style_facts = {
+        field: _clean_ranked(items, with_kind=False)
+        for field, items in (result.get("style_facts") or {}).items()
+        if field in STYLE_FACT_FIELDS
+    }
 
-    return {"concept_groups": groups, "facts": facts}
+    field_priority = {"elements": DEFAULT_FIELD_PRIORITY}
+    if background_facts:
+        field_priority["background"] = DEFAULT_FIELD_PRIORITY
+    for field in style_facts:
+        field_priority[field] = DEFAULT_FIELD_PRIORITY
+
+    return {
+        "concept_groups": groups,
+        "facts": facts,
+        "background_facts": background_facts,
+        "style_facts": style_facts,
+        "field_priority": field_priority,
+    }
+
+
+def is_cache_current(path: Path) -> bool:
+    try:
+        item = io_utils.read_json(path)
+    except (OSError, ValueError):
+        return False
+    return isinstance(item, dict) and all(k in item for k in CACHE_REQUIRED_KEYS)
 
 
 def main() -> None:
@@ -151,13 +220,18 @@ def main() -> None:
 
     todo = []
     n_cached = 0
+    n_stale = 0
     for row in rows:
-        if not args.overwrite and (cache_dir / "{}.json".format(row["id"])).is_file():
-            n_cached += 1
-            continue
+        path = cache_dir / "{}.json".format(row["id"])
+        if not args.overwrite and path.is_file():
+            if is_cache_current(path):
+                n_cached += 1
+                continue
+            n_stale += 1
         todo.append(row)
 
-    print("đã có cache: {} | cần gọi model: {}".format(n_cached, len(todo)))
+    print("đã có cache: {} | cache schema cũ (gọi lại): {} | cần gọi model: {}".format(
+        n_cached, n_stale, len(todo)))
 
     failures: List[Dict[str, Any]] = []
 
@@ -185,13 +259,12 @@ def main() -> None:
         llm.run_parallel(todo, process, workers=args.workers,
                          desc="phân rã", on_error=on_error)
 
-    # Gộp toàn bộ cache thành một jsonl cho bước sau.
+    # Gộp cache thành một jsonl cho bước sau -- chỉ lấy file đúng schema hiện tại.
     merged: List[Dict[str, Any]] = []
     for row in rows:
         path = cache_dir / "{}.json".format(row["id"])
-        if path.is_file():
-            item = io_utils.read_json(path)
-            merged.append({"id": row["id"], **item})
+        if path.is_file() and is_cache_current(path):
+            merged.append({"id": row["id"], **io_utils.read_json(path)})
 
     n_written = io_utils.write_jsonl(out_dir / "decompose.jsonl", merged)
     if failures:
@@ -200,6 +273,7 @@ def main() -> None:
     io_utils.summary(**{
         "mẫu xử lý": len(rows),
         "dùng lại cache": n_cached,
+        "cache schema cũ": n_stale,
         "gọi model": len(todo),
         "thất bại": len(failures),
         "ghi ra decompose.jsonl": n_written,

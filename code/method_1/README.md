@@ -22,11 +22,12 @@ Endpoint không bao giờ xuất hiện trong source — có test tự động c
 |------|------|:---------:|--------|
 | 0  | `step0_normalize.py`       | –   | `step0_normalized/` |
 | 1a | `step1a_decompose.py`      | ✅  | `step1a_decompose/` |
-| 1b | `step1b_build_subjson.py`  | –   | `step1b_subjson/` |
+| 1b | `step1b_build_subjson.py`  | ✅  | `step1b_subjson/` |
 | 2a | `step2a_verbalize.py`      | ✅  | `step2a_prompts/` |
 | 2b | `step2b_filter.py`         | ✅  | `step2b_filtered/` |
 | 2b2 | `step2b2_correct.py` (tuỳ chọn, `--retry_rejected`) | ✅  | `step2b2_corrected/` |
 | 2c | `step2c_split.py`          | –   | `step2c_split/` |
+| 2d | `step2d_finalize.py`       | –   | `step2d_final/` |
 
 Mỗi step ghi vào một thư mục con riêng, và tự tìm đầu ra của step trước trong cùng
 thư mục gốc đó.
@@ -50,11 +51,12 @@ Cây đầu ra:
 test_1/
 ├── step0_normalized/     targets.jsonl, targets/, audit_report.json
 ├── step1a_decompose/     decompose.jsonl, decompose/<id>.json
-├── step1b_subjson/       subjson.jsonl, stats.json
+├── step1b_subjson/       subjson.jsonl, selection/<id>.json, stats.json
 ├── step2a_prompts/       prompts.jsonl, prompts/<id>__<level>.json
 ├── step2b_filtered/      passed.jsonl, rejected.jsonl, report.json
 ├── step2b2_corrected/    corrected_passed.jsonl, rejected_final.jsonl (chỉ có nếu --retry_rejected)
-└── step2c_split/         train.jsonl, val.jsonl, test.jsonl
+├── step2c_split/         train.jsonl, val.jsonl, test.jsonl
+└── step2d_final/         train.jsonl, val.jsonl, test.jsonl  <- DỮ LIỆU HUẤN LUYỆN
 ```
 
 | Cờ của `run_all.sh` | Mặc định | |
@@ -64,7 +66,7 @@ test_1/
 | `--test` | tắt | chạy thử trên ít mẫu |
 | `--test_samples N` | 20 | |
 | `--workers N` | 4 | số luồng gọi model |
-| `--from STEP` | `0` | bắt đầu từ `0\|1a\|1b\|2a\|2b\|2b2\|2c` |
+| `--from STEP` | `0` | bắt đầu từ `0\|1a\|1b\|2a\|2b\|2b2\|2c\|2d` |
 | `--retry_rejected` | tắt | bật step 2b2: sửa lại (retry ĐÚNG 1 lần) prompt bị 2b loại |
 | `--ignore_judge` | tắt | tắt hẳn cổng 2b — không gọi judge, coi mọi prompt là đạt |
 
@@ -85,12 +87,19 @@ mạng — dùng để soi prompt trước khi đốt tiền.
 
 ### Ghi chú vận hành
 
-- **Cache & resume.** Step 1a / 2a / 2b lưu kết quả từng mẫu ra file riêng. Chạy lại
+- **Cache & resume.** Step 1a / 1b / 2a / 2b lưu kết quả từng mẫu ra file riêng. Chạy lại
   sẽ bỏ qua mẫu đã xong, nên có thể dừng giữa chừng rồi chạy tiếp. Dùng `--overwrite`
   để gọi lại từ đầu.
 - **Song song.** `--workers N` (mặc định 4).
-- **Deterministic.** Step 1a chạy ở `temperature=0` và được cache; mọi việc cắt dữ liệu
-  ở step 1b là code thuần có seed. Nghĩa là tái tạo lại y hệt dataset mà không cần gọi lại model.
+- **1a phân rã, 1b chọn lọc — cả hai là LLM, không có rule nội dung.** 1a tách MỌI trường
+  (element, background, photo/art_style, lighting, aesthetics) thành mệnh đề tiếng Việt đã xếp
+  hạng. 1b đưa bản phân rã + định nghĩa short/medium/long (độ phủ × độ sâu × loại thông tin)
+  cho LLM chọn cả 3 mức trong một lần gọi. Code chỉ KIỂM TRA: chép nguyên văn, lồng nhau
+  short ⊆ medium ⊆ long, chủ thể bắt buộc (từ tên file), trần từ (short 16, medium 50); sai
+  thì gọi lại kèm danh sách lỗi (`--max_fix_attempts`, mặc định 2). Checklist ghép thẳng từ
+  các mệnh đề đã chọn, và 2a chỉ nhận đúng các mệnh đề đó.
+- **Deterministic.** 1a và 1b chạy ở `temperature=0` và được cache. Cache 1b gắn dấu vân tay
+  (đầu vào + system prompt) — 1a đổi kết quả hoặc sửa prompt 1b thì ảnh đó tự được gọi lại.
 - **Model chấm lọc riêng.** Step 2b ưu tiên `JUDGE_BASE_URL` / `JUDGE_MODEL` nếu `.env`
   có khai báo — nên dùng model khác họ với model sinh để tránh thiên vị.
 - **Sửa lại prompt bị loại (`--retry_rejected`).** Mặc định TẮT. Bật lên thì sau step 2b,
@@ -100,27 +109,33 @@ mạng — dùng để soi prompt trước khi đốt tiền.
   giữ `original_prompt` để audit); vẫn fail thì mới thật sự loại — **retry đúng 1 lần**,
   không lặp thêm. `step2c_split.py` tự phát hiện và gộp `corrected_passed.jsonl` nếu có,
   không cần cấu hình gì thêm.
+- **Nhãn Y phải qua step 2d.** `target_json` trong `step2c_split/` vẫn mang trường
+  `id` ở mỗi element -- đó là tay cầm nội bộ do step 0 gán để step 1a/1b tham chiếu
+  element, KHÔNG thuộc schema Ideogram 4 (`CaptionVerifier` báo `unknown keys ['id']`).
+  `step2d_finalize.py` bóc `id` và khoá lại thứ tự key, ghi ra `step2d_final/`.
+  **Train bằng `step2d_final/`, không phải `step2c_split/`.**
 - **Tắt hẳn cổng lọc (`--ignore_judge`).** Không gọi judge, mọi prompt được coi là đạt
   — không chấm gì cả. Dùng khi debug hoặc muốn tin thẳng đầu ra của 2a.
 
 ## Test
 
 ```bash
-python3 tests/test_pipeline.py       # 109 test, không chạm mạng
+python3 tests/test_pipeline.py       # 125 test, không chạm mạng
 ```
 
 Logic thuần được test đầy đủ hành vi. Phần gọi model chỉ test được những gì test
 được mà không cần server: dựng endpoint/payload/headers, parse response
 (kể cả khi bị bọc ```` ```json ````), validate đầu ra của model, dựng messages.
 
-Chưa có server thì vẫn chạy thử được đường ống 1b → 2c bằng dữ liệu giả:
+Chưa có server thì vẫn soi được đầu vào của 1b bằng dữ liệu giả (1b gọi model nên chỉ
+chạy được `--dry_run`):
 
 ```bash
 python3 step0_normalize.py --in_dir DATA --out_root test_1 --test --test_samples 20
 python3 tools/make_mock_decompose.py \
     --targets_file test_1/step0_normalized/targets.jsonl \
     --out_file     test_1/step1a_decompose/decompose.jsonl
-python3 step1b_build_subjson.py --out_root test_1
+python3 step1b_build_subjson.py --out_root test_1 --dry_run
 ```
 
 ## Hai điểm thiết kế dễ hiểu nhầm
@@ -130,10 +145,10 @@ Cả 3 mức short/medium/long đều dùng chung nhãn `Y = target_json` đầy
 Prompt ngắn nhưng nhãn vẫn giàu → model buộc phải học cách lấp đầy khoảng trống.
 `sub_json` chỉ có hai việc: làm đầu vào cho step 2a, và làm checklist chấm điểm.
 
-**2. Nén theo hai trục, không phải một.**
-Chỉ cắt bớt số element là chưa đủ — mỗi `desc` dài trung bình 19 từ, nên prompt
-"short" giữ 2 element vẫn ra ~38 từ, đặc như JSON. Phải cắt cả *bề rộng*
-(giữ bao nhiêu nhóm khái niệm) lẫn *chiều sâu* (mỗi element giữ bao nhiêu mệnh đề).
+**2. Mức chi tiết định nghĩa theo nội dung, không theo số từ.**
+Short / medium / long khác nhau ở *độ phủ* (nói tới bao nhiêu phần của ảnh), *độ sâu*
+(mỗi phần tả kỹ tới đâu) và *loại thông tin* (chủ thể → thuộc tính → bối cảnh → phong
+cách). Số từ chỉ là trần phụ. Định nghĩa đầy đủ nằm trong `STEP1B_SYSTEM`.
 
 ## Ngoài phạm vi
 

@@ -55,6 +55,23 @@ class TestBuildSystemPrompt(unittest.TestCase):
     def test_level_guidance_keys_match_levels_tuple(self):
         self.assertEqual(set(prompts.LEVEL_GUIDANCE.keys()), set(prompts.LEVELS))
 
+    def test_schema_never_shows_an_id_field(self):
+        """`id` là tay cầm nội bộ của pipeline sinh dữ liệu, KHÔNG thuộc schema
+        Ideogram 4 -- CaptionVerifier báo "unknown keys ['id']". Nhãn Y đã được
+        step2d bóc `id`, nên system prompt cũng không được dạy model sinh ra nó."""
+        for level in prompts.LEVELS:
+            text = prompts.build_system_prompt(level)
+            self.assertNotIn('"id"', text)
+            self.assertIn("no id field", text)
+
+    def test_schema_documents_both_style_key_orders(self):
+        """Ideogram dùng hai thứ tự khác nhau: ảnh chụp thì `photo` TRƯỚC `medium`,
+        còn lại thì `art_style` SAU `medium`. Gộp làm một là sai một nửa."""
+        for level in prompts.LEVELS:
+            text = prompts.build_system_prompt(level)
+            self.assertIn('"photo": "...", "medium"', text)
+            self.assertIn('"medium": "illustration", "art_style"', text)
+
 
 if __name__ == "__main__":
     unittest.main()

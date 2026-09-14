@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""CÔNG CỤ DEV — tạo decompose.jsonl GIẢ để chạy thử step 1b → 2c khi chưa có server.
+"""CÔNG CỤ DEV — tạo decompose.jsonl GIẢ để soi đầu vào của step 1b khi chưa có server.
 
-KHÔNG dùng cho dữ liệu thật. Kết quả chỉ có tác dụng kiểm tra đường ống chạy thông,
-vì việc gom nhóm và phân rã mệnh đề ở đây làm bằng luật thô, không phải bằng model.
+KHÔNG dùng cho dữ liệu thật. Việc gom nhóm và phân rã ở đây làm bằng luật thô, không
+phải bằng model. Step 1b giờ gọi model, nên mock chỉ đủ để chạy `--dry_run` của 1b.
 
     python tools/make_mock_decompose.py --limit 50
-    python step1b_build_subjson.py --decompose_file output/_mock/decompose.jsonl
+    python step1b_build_subjson.py --decompose_file output/_mock/decompose.jsonl --dry_run
 """
 
 from __future__ import annotations
@@ -85,7 +85,22 @@ def mock_decompose(target: Dict[str, Any]) -> Dict[str, Any]:
     if not groups:
         groups.append({"name": "chủ thể chính", "member_ids": [e["id"] for e in elements],
                        "cardinality": "vague", "cultural": False})
-    return {"concept_groups": groups, "facts": facts}
+    comp = target.get("compositional_deconstruction") or {}
+    background = str(comp.get("background") or "").strip()
+    background_facts = split_facts(background) if background else []
+
+    style = target.get("style_description") or {}
+    style_facts: Dict[str, List[Dict[str, Any]]] = {}
+    for field in ("photo", "art_style", "lighting", "aesthetics"):
+        value = str(style.get(field) or "").strip()
+        if value:
+            parts = [p.strip().lower() for p in value.split(",") if p.strip()]
+            style_facts[field] = [{"rank": i, "text": p} for i, p in enumerate(parts)]
+
+    field_priority = {"elements": 1, **({"background": 1} if background_facts else {}),
+                      **{f: 1 for f in style_facts}}
+    return {"concept_groups": groups, "facts": facts, "background_facts": background_facts,
+            "style_facts": style_facts, "field_priority": field_priority}
 
 
 def main() -> None:

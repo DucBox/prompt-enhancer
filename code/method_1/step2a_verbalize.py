@@ -85,23 +85,32 @@ def sample_persona(rng: random.Random, english_rate: float) -> Dict[str, str]:
     }
 
 
+STYLE_FIELDS = ("photo", "art_style", "lighting", "aesthetics")
+
+
 def build_spec(sub: Dict[str, Any], persona: Dict[str, str]) -> Dict[str, Any]:
-    """Bản mô tả đưa cho model — chỉ chứa đúng phần user 'được biết'."""
-    scene_bits = [v for v in sub.get("scene", {}).values() if v]
-    return {
+    """Bản mô tả đưa cho model — chứa ĐÚNG các mệnh đề trong checklist, không hơn.
+
+    Không đưa tên nhóm thô (thường chỉ là nhãn như "cảnh nền"): model sẽ nhắc tới nó và
+    bị 2b chấm là thêm tin.
+    """
+    spec: Dict[str, Any] = {
         "detail_level": sub["detail_level"],
         "length_hint": sub["length_hint"],
         "persona": persona,
-        "scene": ", ".join(scene_bits),
         "groups": [
-            {
-                "name": g["name"],
-                "cardinality": g["cardinality"],
-                "facts": g["facts"],
-            }
+            {"facts": g["facts"], **({"so_nhieu": True} if g.get("so_nhieu") else {})}
             for g in sub["groups"]
         ],
     }
+    if sub.get("background"):
+        spec["boi_canh"] = sub["background"]
+    phong_cach = [f for key in STYLE_FIELDS for f in (sub.get("style") or {}).get(key, [])]
+    if sub.get("medium"):
+        phong_cach.append(sub["medium"])
+    if phong_cach:
+        spec["phong_cach"] = phong_cach
+    return spec
 
 
 def clean_prompt_text(text: str) -> str:

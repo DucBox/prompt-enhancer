@@ -129,8 +129,10 @@ def main() -> None:
             "persona": row.get("persona", {}),
             # sub_json: chỉ dùng để chấm điểm ở bước 5, KHÔNG phải nhãn huấn luyện
             "sub_json": {
-                "scene": sub.get("scene", {}),
                 "groups": sub.get("groups", []),
+                "background": sub.get("background", []),
+                "style": sub.get("style", {}),
+                "medium": sub.get("medium"),
                 "checklist": sub.get("checklist", []),
             },
             # target_json: NHÃN Y — đầy đủ, giống nhau cho cả 3 mức

@@ -6,18 +6,26 @@ Luật (chốt ở bước 0 của plan):
   * `style_description` phải có `photo` HOẶC `art_style`, không được cả hai
   * mỗi element phải có `desc`, `type` thuộc {obj, text}
   * gán `id` ổn định cho từng element (chính là chỉ số trong mảng)
+
+`id` là tay cầm NỘI BỘ của pipeline, không thuộc schema Ideogram 4. Dùng `strip_ids()`
+để bóc nó ra trước khi target_json trở thành nhãn huấn luyện.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+import copy
+from typing import Any, Dict, List
 
 DROP_KEYS = {"bbox", "color_palette"}
 
 TOP_ORDER = ["high_level_description", "style_description", "compositional_deconstruction"]
-STYLE_ORDER = ["aesthetics", "lighting", "photo", "art_style", "medium"]
+# Thứ tự gốc duy nhất của Ideogram 4. Chỉ một trong `photo` / `art_style` có mặt, nên
+# ảnh chụp ra (..., photo, medium) còn ảnh không phải ảnh chụp ra (..., medium, art_style)
+# -- đúng hai thứ tự trong third_party/ideogram4/src/ideogram4/caption_verifier.py.
+STYLE_ORDER = ["aesthetics", "lighting", "photo", "medium", "art_style"]
 COMP_ORDER = ["background", "elements"]
 ELEM_ORDER = ["id", "type", "text", "desc"]
+ELEM_ORDER_NO_ID = ["type", "text", "desc"]
 
 
 def strip_keys(obj: Any) -> Any:
@@ -57,6 +65,33 @@ def normalize(raw: Dict[str, Any], *, assign_ids: bool = True) -> Dict[str, Any]
         obj["compositional_deconstruction"] = reorder(comp, COMP_ORDER)
 
     return reorder(obj, TOP_ORDER)
+
+
+def strip_ids(target: Dict[str, Any]) -> Dict[str, Any]:
+    """Bỏ `id` khỏi mọi element và trả về BẢN SAO đúng schema Ideogram 4.
+
+    Dùng khi lắp nhãn huấn luyện Y. `id` do step0 tự gán (= chỉ số trong danh sách)
+    để step1a tham chiếu element; Ideogram không có trường này nên để nguyên sẽ
+    dạy model sinh ra một key mà bộ sinh ảnh chưa từng thấy lúc train.
+    """
+    out = copy.deepcopy(target)
+
+    style = out.get("style_description")
+    if isinstance(style, dict):
+        out["style_description"] = reorder(style, STYLE_ORDER)
+
+    comp = out.get("compositional_deconstruction")
+    if isinstance(comp, dict):
+        elements = comp.get("elements")
+        if isinstance(elements, list):
+            comp["elements"] = [
+                reorder({k: v for k, v in el.items() if k != "id"}, ELEM_ORDER_NO_ID)
+                if isinstance(el, dict) else el
+                for el in elements
+            ]
+        out["compositional_deconstruction"] = reorder(comp, COMP_ORDER)
+
+    return reorder(out, TOP_ORDER)
 
 
 def validate(obj: Dict[str, Any]) -> List[str]:

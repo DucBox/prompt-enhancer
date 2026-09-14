@@ -34,24 +34,26 @@ Requirements:
 - Preserve non-ASCII characters literally; do not escape Vietnamese text with \\uXXXX.
 - Do not output bbox or color_palette fields.
 
-Target schema:
+Target schema -- photographic captions:
 {
   "high_level_description": "...",
-  "style_description": {
-    "aesthetics": "...",
-    "lighting": "...",
-    "photo": "...", OR "art_style": "...",
-    "medium": "..."
-  },
+  "style_description": {"aesthetics": "...", "lighting": "...", "photo": "...", "medium": "photograph"},
   "compositional_deconstruction": {
     "background": "...",
     "elements": [
-      {"id": 0, "type": "obj", "desc": "..."},
-      {"id": 1, "type": "text", "text": "verbatim text", "desc": "..."}
+      {"type": "obj", "desc": "..."},
+      {"type": "text", "text": "verbatim text", "desc": "..."}
     ]
   }
 }
-Use photo OR art_style, not both. Keep key ordering stable and return minified JSON for the final answer."""
+
+Target schema -- non-photographic captions (illustration, painting, 3D render):
+identical, except style_description uses art_style instead of photo AND puts it after medium:
+  "style_description": {"aesthetics": "...", "lighting": "...", "medium": "illustration", "art_style": "..."}
+
+Use photo OR art_style, never both. Key order is strict and differs between the two
+cases above -- follow it exactly. Emit no keys beyond those shown: in particular, elements
+carry no id field. Return minified JSON for the final answer."""
 
 # Mỗi mức một đoạn hướng dẫn riêng, nối sau BASE_SYSTEM_PROMPT. Đây chính là
 # "system prompt riêng cho từng mức" mà user yêu cầu, không phải một tag chung.

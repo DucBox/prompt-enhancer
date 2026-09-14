@@ -17,7 +17,25 @@ from typing import Any, Dict, List
 # =============================================================================
 
 STEP1A_SYSTEM = r"""Bạn là công cụ phân tích mô tả ảnh. Đầu vào là một JSON mô tả chi tiết một bức ảnh.
-Nhiệm vụ của bạn gồm HAI phần. Chỉ trả về đúng một JSON object, không giải thích gì thêm.
+Nhiệm vụ của bạn gồm BỐN phần. Chỉ trả về đúng một JSON object, không giải thích gì thêm.
+
+Kết quả sẽ được một bước sau dùng để CHỌN LỌC thông tin cho các yêu cầu ngắn / vừa / dài.
+Vì vậy ở bước này:
+- TUYỆT ĐỐI KHÔNG bỏ bớt thông tin. Phải tách ĐẦY ĐỦ mọi ý có trong mô tả gốc — chọn giữ
+  hay bỏ là việc của bước sau.
+- Phải XẾP HẠNG thật chuẩn, vì bước sau chọn theo thứ hạng.
+
+=== LUẬT CHUNG CHO MỌI MỆNH ĐỀ ===
+- Mỗi mệnh đề chỉ nói MỘT ý, viết bằng TIẾNG VIỆT, ngắn (2-6 từ), đọc riêng vẫn hiểu
+  (không cụt câu, không lơ lửng giới từ).
+- Giữ NGUYÊN VĂN tên riêng và thuật ngữ văn hoá Việt.
+- Không bịa thêm ý không có trong mô tả gốc. Không gộp hai ý vào một mệnh đề.
+- Tách theo NGHĨA, không theo dấu câu: "eye-level wide shot" là HAI ý dù không có dấu phẩy;
+  một vế có "with" cũng có thể chứa nhiều ý.
+- "rank" đánh từ 0, xếp theo độ QUAN TRỌNG GIẢM DẦN, TÍNH RIÊNG TRONG TỪNG TRƯỜNG.
+  Hãy dùng TOÀN BỘ JSON (high_level_description, chủ thể chính, các element khác) làm ngữ cảnh
+  để xếp hạng: thông tin làm nên nét RIÊNG của bức ảnh này — thứ người dùng nhiều khả năng
+  nhắc tới nhất — đứng trước; thông tin chung chung mà ảnh nào cũng có đứng sau.
 
 === PHẦN 1: GOM NHÓM KHÁI NIỆM (concept_groups) ===
 Gom các element thành những "khái niệm" mà một NGƯỜI DÙNG BÌNH THƯỜNG sẽ nhắc tới như một thứ duy nhất.
@@ -38,15 +56,28 @@ QUAN TRỌNG: TUYỆT ĐỐI KHÔNG bịa ra con số chính xác khi mô tả g
 Xếp các nhóm theo thứ tự QUAN TRỌNG GIẢM DẦN. Nhóm quan trọng nhất là nhóm được nhắc tới
 trong high_level_description và là chủ thể chính của bức ảnh.
 
-=== PHẦN 2: PHÂN RÃ MỆNH ĐỀ (facts) ===
-Với MỖI element, tách phần mô tả thành các mệnh đề nhỏ nhất, mỗi mệnh đề chỉ nói MỘT ý.
+=== PHẦN 2: PHÂN RÃ ELEMENT (facts) ===
+Với MỖI element, tách "desc" thành các mệnh đề theo LUẬT CHUNG.
+- Mệnh đề rank 0 LUÔN là danh từ chủ thể trần trụi.
+- Các mệnh đề sau: màu sắc, chất liệu, công dụng thường quan trọng hơn vị trí trong khung hình.
+- Nếu element có trường "text" (chữ xuất hiện trong ảnh), phải có một mệnh đề chứa NGUYÊN VĂN chữ đó.
+- "kind" thuộc: subject | color | material | attribute | action | position | count
 
-- Mệnh đề đầu tiên (rank 0) LUÔN là danh từ chủ thể trần trụi, viết bằng TIẾNG VIỆT ngắn gọn.
-- Các mệnh đề sau xếp theo mức độ quan trọng giảm dần: thứ mà người dùng nhiều khả năng
-  nhắc tới nhất đứng trước (màu sắc, chất liệu, công dụng thường quan trọng hơn vị trí trong khung hình).
-- Mỗi mệnh đề viết bằng tiếng Việt, ngắn (2-6 từ).
-- Giữ NGUYÊN VĂN tên riêng và thuật ngữ văn hoá Việt.
-- Loại "kind" thuộc: subject | color | material | attribute | action | position | count
+=== PHẦN 3: PHÂN RÃ BỐI CẢNH (background_facts) ===
+Tách compositional_deconstruction.background thành các mệnh đề theo LUẬT CHUNG, dùng cùng bộ
+"kind" như PHẦN 2.
+- Mệnh đề rank 0 là không gian hoặc bề mặt chính của bối cảnh (ví dụ "mặt bàn gỗ", "bầu trời", "mặt sông").
+- Bối cảnh nhắc tới vật cụ thể nào (cái bát, giá treo đồ, hàng cây...) thì vật đó là một mệnh đề
+  riêng; các đặc điểm của nó (màu, chất liệu, vị trí, độ mờ...) là các mệnh đề riêng khác.
+
+=== PHẦN 4: PHÂN RÃ PHONG CÁCH (style_facts) ===
+Tách từng trường của style_description thành các mệnh đề theo LUẬT CHUNG (không có "kind"):
+- "photo"      (nếu có): góc máy, cỡ cảnh, lấy nét, ống kính... — mỗi ý một mệnh đề.
+- "art_style"  (nếu có): kỹ thuật vẽ hoặc dựng hình, nét, cách tô màu, chất liệu nền... — mỗi ý một mệnh đề.
+- "lighting"  : nguồn sáng, cường độ, hướng, màu ánh sáng, bóng đổ... — mỗi ý một mệnh đề.
+- "aesthetics": mỗi tag là một mệnh đề, dịch sang tiếng Việt.
+KHÔNG phân rã "medium" và "color_palette". Chỉ tạo khoá cho trường THẬT SỰ có trong đầu vào
+("photo" và "art_style" không bao giờ cùng xuất hiện).
 
 === ĐỊNH DẠNG ĐẦU RA ===
 {
@@ -58,6 +89,14 @@ Với MỖI element, tách phần mô tả thành các mệnh đề nhỏ nhất
       {"rank": 0, "kind": "subject", "text": "..."},
       {"rank": 1, "kind": "color", "text": "..."}
     ]
+  },
+  "background_facts": [
+    {"rank": 0, "kind": "subject", "text": "..."}
+  ],
+  "style_facts": {
+    "photo": [{"rank": 0, "text": "..."}],
+    "lighting": [{"rank": 0, "text": "..."}],
+    "aesthetics": [{"rank": 0, "text": "..."}]
   }
 }
 Khoá của "facts" là id của element, dạng chuỗi. Mọi element đều phải có mặt."""
@@ -70,8 +109,8 @@ STEP1A_FEWSHOT_INPUT = {
     ),
     "style_description": {
         "aesthetics": "documentary, vibrant",
-        "lighting": "bright daylight",
-        "photo": "top-down aerial, wide shot",
+        "lighting": "bright daylight with soft shadows",
+        "photo": "top-down aerial, wide shot, deep focus",
         "medium": "photograph",
     },
     "compositional_deconstruction": {
@@ -119,6 +158,29 @@ STEP1A_FEWSHOT_OUTPUT = {
             {"rank": 3, "kind": "attribute", "text": "chở khách ngồi thành hàng"},
         ],
     },
+    "background_facts": [
+        {"rank": 0, "kind": "subject", "text": "mặt sông"},
+        {"rank": 1, "kind": "attribute", "text": "rộng"},
+        {"rank": 2, "kind": "color", "text": "nước nâu đục"},
+        {"rank": 3, "kind": "position", "text": "lấp đầy khung hình"},
+    ],
+    "style_facts": {
+        "photo": [
+            {"rank": 0, "text": "chụp từ trên không"},
+            {"rank": 1, "text": "nhìn thẳng từ trên xuống"},
+            {"rank": 2, "text": "toàn cảnh"},
+            {"rank": 3, "text": "lấy nét sâu"},
+        ],
+        "lighting": [
+            {"rank": 0, "text": "ánh sáng ban ngày"},
+            {"rank": 1, "text": "trời sáng rõ"},
+            {"rank": 2, "text": "bóng đổ mềm"},
+        ],
+        "aesthetics": [
+            {"rank": 0, "text": "sống động"},
+            {"rank": 1, "text": "phong cách phóng sự"},
+        ],
+    },
 }
 
 
@@ -133,6 +195,152 @@ def build_step1a_messages(target_json: Dict[str, Any]) -> List[Dict[str, str]]:
 
 
 # =============================================================================
+# STEP 1b — LLM chọn lọc thông tin cho short / medium / long
+# =============================================================================
+
+from common import subjson  # noqa: E402  (chỉ để dựng few-shot; subjson không import prompts)
+
+STEP1B_SYSTEM = r"""Bạn là công cụ CHỌN LỌC thông tin mô tả ảnh cho ba mức yêu cầu của người dùng:
+ngắn (short), vừa (medium), dài (long).
+
+Đầu vào là bản phân rã của MỘT bức ảnh. Mọi mệnh đề đã được viết bằng tiếng Việt và xếp theo
+độ quan trọng GIẢM DẦN trong từng danh sách:
+- "high_level_description": câu tóm tắt ảnh — chỉ để hiểu ngữ cảnh, không chọn.
+- "medium": loại ảnh (photograph, illustration, 3d_render...).
+- "required_subject": tên nhóm chủ thể BẮT BUỘC (có thể null).
+- "groups": các nhóm khái niệm, nhóm đứng đầu là quan trọng nhất. Mỗi nhóm có "name",
+  "cultural" (mang bản sắc Việt Nam), "cardinality", có thể có "so_luong" (vd "số lượng: 3"),
+  và "elements" = danh sách mệnh đề của từng cá thể (mệnh đề đầu tiên là danh từ chủ thể).
+- "background": mệnh đề về bối cảnh.
+- "style": mệnh đề về góc máy hoặc kỹ thuật vẽ ("photo" / "art_style"), ánh sáng ("lighting"),
+  thẩm mỹ ("aesthetics").
+
+Nhiệm vụ: với MỖI mức, chọn ra đúng những gì một người dùng ở mức đó sẽ nói khi đặt hàng
+bức ảnh này.
+
+=== ĐỊNH NGHĨA BA MỨC ===
+Mức chi tiết được quyết định bởi ĐỘ PHỦ (nói tới bao nhiêu phần của ảnh), ĐỘ SÂU (mỗi phần tả
+kỹ tới đâu) và LOẠI THÔNG TIN — KHÔNG phải số từ.
+
+SHORT — người dùng chỉ nói thứ họ quan tâm nhất, bỏ qua phần còn lại của ảnh.
+- Chỉ nhóm chủ thể chính, cùng danh từ chủ thể của nó.
+- Thêm TỐI ĐA 2 ý, chọn trong số:
+    * thuộc tính nổi bật nhất của chủ thể chính;
+    * HOẶC một bối cảnh / địa điểm CÓ BẢN SẮC (Hồ Tây, phố cổ Hội An, cánh đồng lúa, bãi
+      biển...), lấy từ "background" HOẶC từ một nhóm văn hoá — không lấy cả hai nguồn.
+  Mỗi thuộc tính, "so_luong", ý bối cảnh, nhóm thêm ngoài chủ thể chính, hay đặt "medium"
+  là true đều tính là MỘT ý.
+- KHÔNG lấy bối cảnh chung chung (mặt bàn gỗ, phông nền trắng, bức tường...).
+- KHÔNG lấy "style".
+- Tổng số từ của mọi mệnh đề (kể cả tên nhóm văn hoá) KHÔNG quá 16.
+
+MEDIUM — người dùng tả những thứ chính của ảnh nhưng chưa đi vào chi tiết vụn.
+- Chủ thể chính với 2-4 thuộc tính nổi bật.
+- 1-3 nhóm phụ quan trọng, mỗi nhóm 1-2 thuộc tính.
+- 1-2 ý bối cảnh chính.
+- Tối đa 1 ý "style", CHỈ KHI nó thật sự đáng chú ý với bức ảnh này (chụp từ trên cao,
+  flat lay, tranh khắc gỗ...). Không lấy thứ ảnh nào cũng có (ngang tầm mắt, lấy nét sâu,
+  ánh sáng ban ngày...).
+- Tổng số từ KHÔNG quá 50.
+
+LONG — người dùng tả gần như toàn bộ bức ảnh.
+- Mọi nhóm, với thuộc tính, vị trí, hành động.
+- Bối cảnh chi tiết.
+- Ánh sáng, góc máy, phong cách.
+- Được bỏ mệnh đề trùng lặp hoặc quá vụn vặt, nhưng phần lớn thông tin phải có mặt.
+
+=== LUẬT CHỌN ===
+1. Chép NGUYÊN VĂN mệnh đề và tên nhóm từ đầu vào. Không sửa chữ, không gộp, không dịch,
+   không bịa.
+2. Tên nhóm thường chỉ là nhãn. Muốn nói tới thứ gì thì chọn mệnh đề của nó, kể cả danh từ
+   chủ thể. Riêng nhóm "cultural": true, tên nhóm được tính là đã nói.
+3. Ưu tiên theo thứ tự xếp hạng, nhưng được bỏ qua mệnh đề hạng cao nếu nó chung chung,
+   không đáng nói ở mức đó.
+4. LỒNG NHAU: mọi thứ có ở short phải có ở medium; mọi thứ có ở medium phải có ở long.
+5. Nếu "required_subject" khác null, nhóm đó PHẢI có mặt ở cả ba mức.
+6. "so_luong" chép vào "facts" của nhóm khi con số là thông tin đáng nói. KHÔNG chọn khi tên
+   nhóm đã tự thể hiện số lượng (đôi, cặp, bộ...).
+7. "medium": đặt true khi loại ảnh là thông tin đáng nói (tranh minh hoạ, ảnh dựng 3D...);
+   ảnh chụp thông thường thì thường không cần.
+8. Đừng chọn theo một khuôn cố định cho mọi ảnh: số lượng ý thay đổi theo độ nổi bật thực tế
+   của từng bức ảnh, trong giới hạn của mỗi mức.
+
+=== ĐỊNH DẠNG ĐẦU RA ===
+Chỉ trả về đúng một JSON object, không giải thích:
+{
+  "short":  {"groups": [{"name": "...", "facts": ["..."]}], "background": [], "style": {}, "medium": false},
+  "medium": {"groups": [...], "background": [...], "style": {...}, "medium": false},
+  "long":   {"groups": [...], "background": [...], "style": {...}, "medium": false}
+}
+- "style" là object, khoá thuộc "photo" / "art_style" / "lighting" / "aesthetics" (chỉ khoá có
+  trong đầu vào), mỗi khoá là danh sách mệnh đề.
+- "facts" của mỗi nhóm là danh sách mệnh đề chọn từ "elements" của nhóm (và "so_luong" nếu chọn)."""
+
+
+STEP1B_FEWSHOT_INPUT = subjson.build_selection_input(
+    STEP1A_FEWSHOT_INPUT, STEP1A_FEWSHOT_OUTPUT, required_group_index=0,
+)
+
+STEP1B_FEWSHOT_OUTPUT = {
+    "short": {
+        "groups": [
+            {"name": "chợ nổi Cái Răng", "facts": []},
+            {"name": "những chiếc thuyền gỗ", "facts": ["chiếc thuyền", "bằng gỗ"]},
+        ],
+        "background": [],
+        "style": {},
+        "medium": False,
+    },
+    "medium": {
+        "groups": [
+            {"name": "chợ nổi Cái Răng", "facts": []},
+            {"name": "những chiếc thuyền gỗ",
+             "facts": ["chiếc thuyền", "số lượng: 2", "bằng gỗ", "màu tím", "là quán ăn nổi", "màu xanh"]},
+            {"name": "người bán hàng đội nón lá", "facts": ["đội nón lá", "đang nấu đồ ăn"]},
+        ],
+        "background": ["mặt sông", "nước nâu đục"],
+        "style": {"photo": ["chụp từ trên không"]},
+        "medium": False,
+    },
+    "long": {
+        "groups": [
+            {"name": "chợ nổi Cái Răng", "facts": []},
+            {"name": "những chiếc thuyền gỗ",
+             "facts": ["chiếc thuyền", "số lượng: 2", "bằng gỗ", "màu tím", "là quán ăn nổi", "dài",
+                       "nằm ngang giữa khung hình", "có khách trên thuyền", "màu xanh",
+                       "chở khách ngồi thành hàng"]},
+            {"name": "người bán hàng đội nón lá",
+             "facts": ["những người bán hàng", "đội nón lá", "đang nấu đồ ăn"]},
+            {"name": "cảnh nền", "facts": ["cái xô nhựa", "màu đỏ", "trên boong thuyền"]},
+        ],
+        "background": ["mặt sông", "rộng", "nước nâu đục", "lấp đầy khung hình"],
+        "style": {
+            "photo": ["chụp từ trên không", "nhìn thẳng từ trên xuống", "toàn cảnh"],
+            "lighting": ["ánh sáng ban ngày", "trời sáng rõ"],
+            "aesthetics": ["sống động"],
+        },
+        "medium": False,
+    },
+}
+
+
+def build_step1b_messages(sel_input: Dict[str, Any]) -> List[Dict[str, str]]:
+    dumps = lambda o: json.dumps(o, ensure_ascii=False, indent=2)  # noqa: E731
+    return [
+        {"role": "system", "content": STEP1B_SYSTEM},
+        {"role": "user", "content": dumps(STEP1B_FEWSHOT_INPUT)},
+        {"role": "assistant", "content": dumps(STEP1B_FEWSHOT_OUTPUT)},
+        {"role": "user", "content": dumps(sel_input)},
+    ]
+
+
+def build_step1b_fix_message(errors: List[str]) -> str:
+    return ("Lựa chọn vừa rồi CHƯA hợp lệ:\n- " + "\n- ".join(errors)
+            + "\nHãy trả lại JSON đầy đủ cho cả ba mức, sửa đúng các lỗi trên và giữ nguyên "
+              "mọi luật chọn.")
+
+
+# =============================================================================
 # STEP 2a — viết user prompt từ sub_json
 # =============================================================================
 
@@ -140,17 +348,21 @@ STEP2A_SYSTEM = r"""Bạn đang đóng vai NGƯỜI DÙNG muốn nhờ AI tạo 
 Bạn được cho một bản mô tả có cấu trúc. Hãy viết ra CÂU YÊU CẦU của bạn.
 Chỉ trả về đúng câu yêu cầu đó, không thêm lời dẫn, không giải thích, không đặt trong ngoặc kép.
 
+Bản mô tả gồm: "groups" (mỗi nhóm là các mệnh đề về một thứ trong ảnh), "boi_canh" (bối cảnh)
+và "phong_cach" (góc chụp, ánh sáng, phong cách, loại ảnh) nếu có.
+
 BẮT BUỘC
 - Viết như người ĐANG ĐẶT HÀNG một bức ảnh chưa tồn tại,
   KHÔNG phải người đang mô tả một bức ảnh có sẵn trước mặt.
 - Chỉ nói những gì có trong bản mô tả. Cấm thêm bất kỳ thông tin mới nào.
-- PHẢI nhắc đến ĐẦY ĐỦ mọi mệnh đề được cho — kể cả phần "scene" (ánh sáng, góc
-  chụp, không khí, bối cảnh) nếu có. Được phép diễn đạt lại tự nhiên hơn, gộp
-  chung với ý khác, KHÔNG được tự ý bỏ sót bất kỳ mệnh đề nào chỉ vì thấy không
-  quan trọng — thiếu một mệnh đề cũng bị coi là lỗi giống hệt như thêm bịa.
+- PHẢI nhắc đến ĐẦY ĐỦ mọi mệnh đề được cho — trong "groups", "boi_canh" và "phong_cach".
+  Được phép diễn đạt lại tự nhiên hơn, gộp chung với ý khác, KHÔNG được tự ý bỏ sót bất kỳ
+  mệnh đề nào chỉ vì thấy không quan trọng — thiếu một mệnh đề cũng bị coi là lỗi giống hệt
+  như thêm bịa.
 - Giữ NGUYÊN VĂN thuật ngữ tiếng Việt (áo dài, khăn xếp, bánh tét, chợ nổi Cái Răng, nón lá...).
-- Nếu bản mô tả ghi số lượng chính xác thì phải nói đúng số đó.
-  Nếu ghi mơ hồ ("nhiều", "mấy") thì cũng nói mơ hồ, KHÔNG được tự chế ra con số.
+- Mệnh đề "số lượng: N" thì phải nói đúng số đó.
+  Nhóm có "so_nhieu": true (không kèm số lượng) thì nói mơ hồ ("mấy", "vài", "nhiều"),
+  KHÔNG được tự chế ra con số. Nhóm không có hai thứ này là một cá thể.
 
 CẤM
 - Cấm liệt kê từng vật thể thành từng mệnh đề riêng biệt.
@@ -165,7 +377,8 @@ CẤM
 - Viết ĐÚNG CHÍNH TẢ, đủ dấu tiếng Việt. Không mô phỏng lỗi gõ hay viết tắt."""
 
 # Few-shot viết tay: 3 mức độ dài + 1 ví dụ short thứ hai để tránh model bám một khuôn mở đầu.
-# Tất cả đều viết đúng chính tả — dữ liệu nhiễu không thuộc phạm vi bước này.
+# Bản mô tả đúng dạng step2a_verbalize.build_spec() dựng ra. Câu trả lời nhắc ĐỦ mọi mệnh đề,
+# không thêm gì (kể cả vị trí), và viết đúng chính tả.
 STEP2A_FEWSHOT = [
     (
         {
@@ -173,14 +386,12 @@ STEP2A_FEWSHOT = [
             "length_hint": "8-20 từ",
             "persona": {"vai": "user phổ thông", "giọng": "mô tả trung tính",
                         "ngôn ngữ": "tiếng Việt"},
-            "scene": "chụp từ trên cao",
             "groups": [
-                {"name": "chợ nổi Cái Răng", "cardinality": "exact:1", "facts": ["chợ nổi Cái Răng"]},
-                {"name": "những chiếc thuyền gỗ", "cardinality": "vague",
-                 "facts": ["chiếc thuyền", "bằng gỗ"]},
+                {"facts": ["chợ nổi Cái Răng"]},
+                {"facts": ["chiếc thuyền", "bằng gỗ"], "so_nhieu": True},
             ],
         },
-        "Ảnh chụp từ trên cao chợ nổi Cái Răng với mấy chiếc thuyền gỗ",
+        "Ảnh chợ nổi Cái Răng với mấy chiếc thuyền gỗ",
     ),
     (
         {
@@ -188,17 +399,17 @@ STEP2A_FEWSHOT = [
             "length_hint": "30-60 từ",
             "persona": {"vai": "designer", "giọng": "ra lệnh",
                         "ngôn ngữ": "tiếng Việt"},
-            "scene": "chụp từ flycam, sông nước đục",
             "groups": [
-                {"name": "chợ nổi Cái Răng", "cardinality": "exact:1", "facts": ["chợ nổi Cái Răng"]},
-                {"name": "những chiếc thuyền gỗ", "cardinality": "exact:3",
-                 "facts": ["chiếc thuyền", "bằng gỗ", "một chiếc màu tím", "là quán ăn nổi"]},
-                {"name": "người bán hàng", "cardinality": "vague",
-                 "facts": ["những người bán hàng", "đội nón lá", "đang nấu đồ ăn"]},
+                {"facts": ["chợ nổi Cái Răng"]},
+                {"facts": ["chiếc thuyền", "số lượng: 3", "bằng gỗ", "một chiếc màu tím",
+                           "là quán ăn nổi"]},
+                {"facts": ["những người bán hàng", "đội nón lá", "đang nấu đồ ăn"], "so_nhieu": True},
             ],
+            "boi_canh": ["mặt sông", "nước đục"],
+            "phong_cach": ["chụp từ flycam"],
         },
-        "Chụp từ flycam chợ nổi Cái Răng trên sông nước đục, ba chiếc thuyền gỗ neo gần nhau, "
-        "một chiếc màu tím bán đồ ăn, mấy người đội nón lá đang nấu nướng.",
+        "Chụp từ flycam chợ nổi Cái Răng trên mặt sông nước đục, ba chiếc thuyền gỗ, trong đó "
+        "một chiếc màu tím làm quán ăn nổi, mấy người bán hàng đội nón lá đang nấu đồ ăn.",
     ),
     (
         {
@@ -206,23 +417,20 @@ STEP2A_FEWSHOT = [
             "length_hint": "100-200 từ",
             "persona": {"vai": "user phổ thông", "giọng": "kể lể lan man",
                         "ngôn ngữ": "tiếng Việt"},
-            "scene": "chụp từ trên cao, mặt sông rộng màu nâu đục",
             "groups": [
-                {"name": "chợ nổi Cái Răng", "cardinality": "exact:1", "facts": ["chợ nổi Cái Răng"]},
-                {"name": "thuyền quán ăn", "cardinality": "exact:1",
-                 "facts": ["chiếc thuyền", "màu tím", "bằng gỗ", "dài", "là quán ăn nổi"]},
-                {"name": "người bán hàng", "cardinality": "vague",
-                 "facts": ["những người bán hàng", "đội nón lá", "đang nấu đồ ăn"]},
-                {"name": "thuyền chở hàng", "cardinality": "exact:1",
-                 "facts": ["chiếc thuyền", "chở sọt trái cây"]},
-                {"name": "thuyền chở khách", "cardinality": "exact:1",
-                 "facts": ["chiếc thuyền", "màu xanh", "chở khách ngồi thành hàng"]},
+                {"facts": ["chợ nổi Cái Răng"]},
+                {"facts": ["chiếc thuyền", "màu tím", "bằng gỗ", "dài", "là quán ăn nổi"]},
+                {"facts": ["những người bán hàng", "đội nón lá", "đang nấu đồ ăn"], "so_nhieu": True},
+                {"facts": ["chiếc thuyền", "chở sọt trái cây"]},
+                {"facts": ["chiếc thuyền", "màu xanh", "chở khách ngồi thành hàng"]},
             ],
+            "boi_canh": ["mặt sông", "rộng", "màu nâu đục", "chiếm gần hết khung hình"],
+            "phong_cach": ["chụp từ trên cao", "ánh sáng ban ngày"],
         },
-        "Mình muốn ảnh chụp từ trên cao cảnh chợ nổi Cái Răng. Mặt sông rộng màu nâu đục chiếm gần "
-        "hết khung hình. Ở giữa là chiếc thuyền gỗ dài màu tím làm quán ăn nổi, có người đội nón lá "
-        "đang nấu. Bên trên là thuyền chở đầy sọt trái cây, phía dưới là chiếc thuyền xanh chở khách "
-        "ngồi thành hàng.",
+        "Mình muốn ảnh chụp từ trên cao cảnh chợ nổi Cái Răng dưới ánh sáng ban ngày. Mặt sông "
+        "rộng màu nâu đục chiếm gần hết khung hình. Có một chiếc thuyền gỗ dài màu tím làm quán ăn "
+        "nổi, mấy người bán hàng đội nón lá đang nấu đồ ăn, thêm một chiếc thuyền chở sọt trái cây "
+        "và một chiếc thuyền màu xanh chở khách ngồi thành hàng.",
     ),
     (
         {
@@ -230,15 +438,12 @@ STEP2A_FEWSHOT = [
             "length_hint": "8-20 từ",
             "persona": {"vai": "user phổ thông", "giọng": "ra lệnh",
                         "ngôn ngữ": "tiếng Việt"},
-            "scene": "chụp trong studio",
             "groups": [
-                {"name": "áo dài nam", "cardinality": "exact:1",
-                 "facts": ["áo dài nam", "màu đỏ"]},
-                {"name": "khăn xếp", "cardinality": "exact:1",
-                 "facts": ["khăn xếp", "màu đen"]},
+                {"facts": ["áo dài nam", "màu đỏ"]},
+                {"facts": ["khăn xếp"]},
             ],
         },
-        "Chụp studio một người đàn ông mặc áo dài nam đỏ, đội khăn xếp đen",
+        "Cho mình ảnh áo dài nam màu đỏ đi kèm khăn xếp",
     ),
 ]
 

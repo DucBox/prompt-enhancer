@@ -71,7 +71,7 @@ def decide(verdict: Dict[str, Any], args: argparse.Namespace,
     Chỉ xét THIẾU/THÊM so với checklist. Văn phong (dịch máy, liệt kê máy móc...)
     không phải tiêu chí loại bỏ ở đây — đó là việc của bước 2a.
 
-    `required_subject` (rút từ TÊN FILE, xem step1b_build_subjson.find_required_group_index)
+    `required_subject` (rút từ TÊN FILE, xem common/subjson.find_required_group_index)
     là chủ thể chính BẮT BUỘC tuyệt đối -- thiếu nó thì loại NGAY, không phụ thuộc
     --max_missing. Không có ràng buộc riêng này thì việc nới --max_missing > 0 để
     giảm tỉ lệ loại có thể vô tình cho lọt đúng trường hợp nguy hiểm nhất: prompt
