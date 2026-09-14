@@ -46,6 +46,18 @@ system prompt được lưu lại trong adapter output (`system_prompt_short.txt
 `system_prompt_medium.txt`, `system_prompt_long.txt`) — app tầng trên đọc đúng
 file tương ứng khi gọi model.
 
+## Kiểm tra môi trường trước khi train
+
+```bash
+python3 check_env.py                    # backend unsloth; thêm --backend hf nếu dùng torchrun
+python3 check_env.py --data_file ../method_1/outputs/test_5_new/step2d_final/train.jsonl
+```
+
+Script kiểm tra Python ≥ 3.10, các gói bắt buộc, `transformers` có kiến trúc `qwen3_5`
+chưa, CUDA / VRAM / bf16, import được script train. Với `--data_file`, nó tải tokenizer
+(không tải trọng số) và encode thử vài dòng bằng đúng hàm của script train. Cuối cùng in
+lệnh `pip install` cho những gì còn thiếu; thoát mã 1 nếu chưa đủ để train.
+
 ## Chạy train
 
 Dùng `step2d_final/` — **không** dùng `step2c_split/` (target ở đó còn `id`; script sẽ từ
