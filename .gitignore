@@ -2,6 +2,9 @@
 /data/
 **/output/
 
+# Repo bên ngoài clone về để tham khảo (có .git riêng)
+/third_party/
+
 # Bí mật
 .env
 .env.local

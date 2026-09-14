@@ -3,6 +3,7 @@ output/
 test_*/
 run_*/
 *.jsonl
+outputs/*.zip
 
 # Bí mật
 .env

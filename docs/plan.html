@@ -92,16 +92,16 @@
 
 <h1>Prompt Enhancer — Kế hoạch triển khai</h1>
 <p class="sub">
-  Mô-đun trung gian: <strong>user prompt → JSON chi tiết</strong> làm đầu vào cho model sinh ảnh.
-  Giai đoạn 1 chỉ làm SFT; DPO/GRPO để sau.
+  Mô-đun trung gian: <strong>user prompt → JSON chi tiết</strong> làm đầu vào cho model sinh ảnh
+  Ideogram 4. Giai đoạn 1 chỉ làm SFT; DPO/GRPO để sau.
 </p>
 
 <h2>Bối cảnh &amp; nguyên tắc cốt lõi</h2>
 
 <p>
-Model sinh ảnh chỉ chạy tốt khi nhận JSON <em>chi tiết và đầy đủ</em>. Nên mô-đun này không chỉ
-"đổi định dạng" mà phải <strong>chi tiết hoá</strong>: dù đầu vào ngắn hay dài, đầu ra luôn phải là
-một JSON dày.
+Ideogram 4 được train <strong>chỉ trên JSON caption có cấu trúc</strong> — prompt văn xuôi đưa thẳng
+vào sẽ không chạy. Nên mô-đun này không chỉ "đổi định dạng" mà phải <strong>chi tiết hoá</strong>:
+dù đầu vào ngắn hay dài, đầu ra luôn phải là một JSON dày, đúng schema.
 </p>
 
 <p>
@@ -120,13 +120,13 @@ theo hướng đi ngược: <span class="muted">JSON → prompt</span>, rồi tr
     </tr>
     <tr>
       <td><code>sub_json</code></td>
-      <td>Phần thông tin mà user "được biết" — một tập con các <em>mệnh đề</em> rút từ
-          <code>target_json</code>. Dùng để sinh prompt và làm <strong>checklist chấm điểm</strong>.
-          Không bao giờ là nhãn Y.</td>
+      <td>Phần thông tin mà user "được biết" — tập con các <em>mệnh đề</em> do LLM chọn ra từ bản
+          phân rã của <code>target_json</code>. Dùng để sinh prompt và làm
+          <strong>checklist chấm điểm</strong>. Không bao giờ là nhãn Y.</td>
     </tr>
     <tr>
       <td><code>persona</code></td>
-      <td>Hồ sơ người viết (vai, ngôn ngữ, độ cẩu thả). Chỉ đổi <em>văn phong</em>, không đổi nội dung.</td>
+      <td>Hồ sơ người viết (vai, giọng, ngôn ngữ). Chỉ đổi <em>văn phong</em>, không đổi nội dung.</td>
     </tr>
   </table>
 </div>
@@ -140,12 +140,11 @@ theo hướng đi ngược: <span class="muted">JSON → prompt</span>, rồi tr
   "compositional_deconstruction": {
     "background": "Quảng trường Ba Đình rộng, bầu trời trong ...",
     "elements": [
-      { "id": 0, "type": "obj", "desc": "Nam thanh niên mặc áo sơ mi trắng ..." },
-      { "id": 1, "type": "obj", "desc": "Nam thanh niên mặc áo phông đen ..." },
-      { "id": 2, "type": "obj", "desc": "Cô gái mặc áo dài trắng ..." },
-      { "id": 3, "type": "obj", "desc": "Lăng Chủ tịch Hồ Chí Minh, khối đá granite xám ..." },
-      { "id": 4, "type": "obj", "desc": "Hàng cây xanh hai bên quảng trường ..." },
-      { "id": 5, "type": "obj", "desc": "Lá cờ đỏ sao vàng trên cột cờ phía xa ..." }
+      { "type": "obj", "desc": "Nam thanh niên mặc áo sơ mi trắng ..." },
+      { "type": "obj", "desc": "Nam thanh niên mặc áo phông đen ..." },
+      { "type": "obj", "desc": "Cô gái mặc áo dài trắng ..." },
+      { "type": "obj", "desc": "Lăng Chủ tịch Hồ Chí Minh, khối đá granite xám ..." },
+      { "type": "obj", "desc": "Hàng cây xanh hai bên quảng trường ..." }
     ]
   }
 }</pre>
@@ -154,23 +153,36 @@ theo hướng đi ngược: <span class="muted">JSON → prompt</span>, rồi tr
 
   28k target_json
         │
-        ├─▶ [0] Chuẩn hoá + audit ──────────▶ target_json sạch, có element id
+        ├─▶ [0]   Chuẩn hoá + audit ─────────────▶ target_json sạch, element có id (nội bộ)
         │
-        ├─▶ [1a] LLM nhóm + phân rã ────────▶ nhóm khái niệm + mệnh đề  (cache, đóng băng)
+        ├─▶ [1a]  LLM phân rã MỌI trường ────────▶ mệnh đề tiếng Việt đã xếp hạng   (cache)
         │
-        ├─▶ [1b] CODE nén 2 trục ───────────▶ sub_json theo 3 mức chi tiết
+        ├─▶ [1b]  LLM chọn lọc cả 3 mức ────────▶ sub_json short / medium / long   (cache)
         │
-        ├─▶ [2a] LLM verbalize ─────────────▶ user_prompt
+        ├─▶ [2a]  LLM verbalize ─────────────────▶ user_prompt
         │
-        ├─▶ [2b] Lọc / QC ──────────────────▶ loại prompt sai lệch (~15-20%)
+        ├─▶ [2b]  LLM judge ─────────────────────▶ loại prompt thêm / thiếu
         │
-        ├─▶ [2c] Chia tập theo id ──────────▶ train / val / test
+        ├─▶ [2b2] LLM sửa 1 lần  (tuỳ chọn) ────▶ cứu lại prompt bị loại
         │
-        ├─▶ [3]  Bộ đánh giá + baseline ────▶ thước đo (làm TRƯỚC khi train)
+        ├─▶ [2c]  Chia tập theo id ──────────────▶ train / val / test
         │
-        ├─▶ [4]  Huấn luyện SFT ────────────▶ LoRA adapter
+        ├─▶ [2d]  Chuẩn hoá nhãn Y ──────────────▶ bóc id, khoá thứ tự key Ideogram 4
         │
-        └─▶ [5]  Đánh giá ──────────────────▶ báo cáo</div>
+        ├─▶ [3]   Bộ đánh giá + baseline ────────▶ thước đo (làm TRƯỚC khi train)
+        │
+        ├─▶ [4]   Huấn luyện SFT ────────────────▶ LoRA adapter
+        │
+        └─▶ [5]   Đánh giá ──────────────────────▶ báo cáo</div>
+
+<div class="callout">
+  <div class="t">Nguyên tắc: LLM hiểu nội dung, code chỉ kiểm tra</div>
+  Không bước nào dùng rule để quyết định <em>nội dung</em> (tách ý nào, giữ ý nào). Mọi quyết định
+  cần hiểu ngôn ngữ đều giao cho LLM: 1a phân rã và xếp hạng, 1b chọn lọc theo mức. Code chỉ làm
+  hai việc: dựng đầu vào và <strong>kiểm tra</strong> đầu ra của LLM (đúng schema, chép nguyên văn,
+  không vượt trần), sai thì gọi lại kèm danh sách lỗi. Lý do đổi sang nguyên tắc này được ghi ở
+  bước 1b.
+</div>
 
 <h2 style="margin-top:7mm">Chi tiết từng bước</h2>
 
@@ -197,33 +209,56 @@ theo hướng đi ngược: <span class="muted">JSON → prompt</span>, rồi tr
   </div>
 
   <p><strong>Làm gì:</strong> bỏ <code>bbox</code> và <code>color_palette</code>; kiểm tra schema
-  (<code>photo</code> hoặc <code>art_style</code>, không được cả hai); gán <code>id</code> ổn định
-  cho từng element; thống kê phân phối số element, độ dài, tỉ lệ lỗi, trùng lặp.</p>
+  (<code>photo</code> hoặc <code>art_style</code>, không được cả hai); khoá thứ tự key; gán
+  <code>id</code> cho từng element; thống kê phân phối.</p>
 
-  <p><strong>Vì sao quan trọng:</strong> phân phối số element thu được ở đây chính là
-  <em>ngưỡng tham chiếu</em> cho chỉ số Richness ở bước 5. Và nếu dữ liệu gốc bẩn thì mọi bước sau vô nghĩa.</p>
+  <table>
+    <tr><th style="width:38mm">Quy ước</th><th>Chi tiết</th></tr>
+    <tr><td><code>id</code> của element</td>
+        <td>Chỉ là tay cầm <strong>nội bộ</strong> để 1a tham chiếu element. Không thuộc schema
+            Ideogram 4 — bị bóc ở bước 2d trước khi thành nhãn Y.</td></tr>
+    <tr><td>Thứ tự key <code>style_description</code></td>
+        <td>Một thứ tự gốc duy nhất: <code>aesthetics, lighting, photo, medium, art_style</code>.
+            Vì chỉ có <code>photo</code> <em>hoặc</em> <code>art_style</code>, ảnh chụp ra
+            <code>…, photo, medium</code>; tranh vẽ ra <code>…, medium, art_style</code> — đúng hai
+            thứ tự trong <code>CaptionVerifier</code> của Ideogram.</td></tr>
+  </table>
 
-  <div class="ex-lbl">Kết quả đo thử trên 1.000 mẫu</div>
+  <div class="ex-lbl">Kết quả đo trên 1.000 mẫu</div>
 <pre>1000/1000 file hợp lệ, 0 lỗi schema        7.831 element
 
-                      p50    p90    max    trung bình
-elements / ảnh          7     14     24        7,8
-từ / desc              18     27     95       19,1   ← xem bước 1b
-từ / background        26     42    109       27,1
-từ / high_level_desc   28     37     59       29,1
+                      p50    p90    max
+elements / ảnh          7     14     24
+từ / desc              18     27     95
+từ / background        26     42    109
+từ / high_level_desc   28     37     59
 
-element type=="text":  31/7831 = 0,4%  (hiếm hơn dự kiến)</pre>
+medium: photograph 994 · illustration 5 (tranh Đông Hồ) · 3d_render 1 (chim Lạc)
+element type=="text":  31/7831 = 0,4%</pre>
 
-  <p><span class="muted">Dữ liệu gốc rất sạch. Con số đáng chú ý là
-  <strong>mỗi <code>desc</code> dài trung bình 19 từ</strong> — nó quyết định thiết kế của bước 1b.</span></p>
+  <div class="ex-lbl">Bản chất nội dung của từng trường</div>
+  <table>
+    <tr><th style="width:36mm">Trường</th><th style="width:40mm">Loại nội dung</th><th>Ghi chú</th></tr>
+    <tr><td><code>medium</code>, <code>type</code></td><td>enum đóng</td><td>3 và 2 giá trị</td></tr>
+    <tr><td><code>photo</code></td><td>ghép 3 trục từ vựng</td>
+        <td>góc máy · cỡ cảnh · lấy nét. Viết không nhất quán: <em>"eye-level, wide shot"</em>
+            (94 ảnh) vs <em>"eye-level wide shot"</em> dính liền (91 ảnh)</td></tr>
+    <tr><td><code>aesthetics</code></td><td>danh sách tag</td>
+        <td>2–3 tag, trộn tag thể loại (<em>documentary</em>) với tag cảm xúc (<em>serene</em>)
+            ở 534/1000 ảnh</td></tr>
+    <tr><td><code>lighting</code></td><td>cụm tả ngắn</td><td>nguồn sáng + bóng đổ, tv 5 từ</td></tr>
+    <tr><td><code>art_style</code></td><td>cụm tả kỹ thuật vẽ</td><td>6/1000 ảnh, nhưng là thông tin cốt lõi của tranh</td></tr>
+    <tr><td><code>background</code>, <code>desc</code></td><td>văn tả tự do</td>
+        <td>background dài và nhiều ý hơn cả desc (tv 26 từ, ~4 ý); 58% có dấu <code>;</code> chia phần</td></tr>
+  </table>
 </div>
 
 <!-- ---------- STEP 1a ---------- -->
 <div class="step">
   <div class="step-head">
     <span class="num">1a</span>
-    <span class="step-title">LLM gom nhóm &amp; phân rã mệnh đề</span>
-    <span class="step-note">LLM · chạy 1 lần · cache</span>
+    <span class="step-title">LLM gom nhóm &amp; phân rã MỌI trường</span>
+    <span class="step-note">LLM · temperature 0 · cache</span>
   </div>
 
   <div class="io">
@@ -234,319 +269,197 @@ element type=="text":  31/7831 = 0,4%  (hiếm hơn dự kiến)</pre>
     <div class="out">
       <div class="lbl">Đầu ra</div>
       <ul>
-        <li>Nhóm khái niệm + số lượng <span class="muted">(bề rộng)</span></li>
-        <li>Mệnh đề nguyên tử của từng <code>desc</code> <span class="muted">(chiều sâu)</span></li>
+        <li><code>concept_groups</code> — nhóm khái niệm + số lượng</li>
+        <li><code>facts</code> — mệnh đề của từng element</li>
+        <li><code>background_facts</code>, <code>style_facts</code></li>
+        <li><code>field_priority</code> — hiện mọi trường = 1</li>
       </ul>
     </div>
   </div>
 
   <p><strong>Nhiệm vụ 1 — gom nhóm.</strong> Một prompt ngắn có thể nhắc tới <em>một khái niệm</em>
   nhưng khái niệm đó lại tương ứng với <em>nhiều element</em>. "Nhóm bạn 2 nam 1 nữ" = 1 khái niệm
-  nhưng 3 element. Nếu chỉ đếm element sẽ cắt nhầm.</p>
+  nhưng 3 element. <code>cardinality</code> có hai trạng thái: <code>exact:n</code> khi đếm được chính
+  xác, <code>vague</code> khi mô tả mơ hồ — tuyệt đối không bịa ra con số.</p>
 
-<pre>{
-  "concept_groups": [
-    { "name": "Lăng Bác",   "member_ids": [3],     "cardinality": "exact:1", "cultural": true },
-    { "name": "nhóm bạn",   "member_ids": [0,1,2], "cardinality": "exact:3",
-      "cardinality_detail": "2 nam, 1 nữ" },
-    { "name": "cảnh nền",   "member_ids": [4,5],   "cardinality": "vague" }
-  ]
-}</pre>
+<pre>"concept_groups": [
+  { "name": "Lăng Bác", "member_ids": [3],     "cardinality": "exact:1", "cultural": true },
+  { "name": "nhóm bạn", "member_ids": [0,1,2], "cardinality": "exact:3", "cultural": false },
+  { "name": "cảnh nền", "member_ids": [4],     "cardinality": "vague",   "cultural": false }
+]</pre>
 
-  <p><span class="muted"><code>cardinality</code> có hai trạng thái — <code>exact:n</code> khi đếm được
-  chính xác, <code>vague</code> khi mô tả kiểu "nhiều", "một đám". Nhầm chỗ này sẽ sinh ra ràng buộc
-  số lượng sai.</span></p>
+  <p><strong>Nhiệm vụ 2 — phân rã.</strong> Tách <em>mọi</em> trường mang nội dung thành mệnh đề
+  tiếng Việt, mỗi mệnh đề một ý, 2–6 từ, đọc riêng vẫn hiểu:</p>
+  <table>
+    <tr><th style="width:44mm">Nguồn</th><th style="width:34mm">Đầu ra</th><th>Ghi chú</th></tr>
+    <tr><td><code>elements[].desc</code></td><td><code>facts</code></td><td>rank 0 luôn là danh từ chủ thể; element có chữ phải giữ nguyên văn chữ</td></tr>
+    <tr><td><code>background</code></td><td><code>background_facts</code></td><td>rank 0 là không gian/bề mặt chính</td></tr>
+    <tr><td><code>photo</code> / <code>art_style</code>, <code>lighting</code>, <code>aesthetics</code></td>
+        <td><code>style_facts</code></td><td>mỗi tag aesthetics là một mệnh đề</td></tr>
+    <tr><td><code>medium</code>, <code>high_level_description</code></td><td>không phân rã</td>
+        <td>medium là enum; HLD chỉ làm ngữ cảnh xếp hạng</td></tr>
+  </table>
 
-  <p><strong>Nhiệm vụ 2 — phân rã mệnh đề.</strong> Mỗi <code>desc</code> dài trung bình 19 từ và
-  gói nhiều thông tin vào một câu. Phải tách thành các mệnh đề nhỏ nhất, có xếp hạng, thì mới
-  cắt bớt chiều sâu được ở bước sau.</p>
+  <div class="callout">
+    <div class="t">Ba luật quan trọng nhất</div>
+    <strong>1. Phân rã đầy đủ, không bỏ ý nào.</strong> Chọn giữ/bỏ là việc của 1b.<br>
+    <strong>2. Tách theo nghĩa, không theo dấu câu.</strong> <em>"eye-level wide shot"</em> là hai ý
+    dù không có dấu phẩy; một vế có <em>"with"</em> có thể chứa nhiều ý.<br>
+    <strong>3. Xếp hạng trong từng trường, dùng toàn bộ JSON làm ngữ cảnh.</strong> Thông tin làm nên
+    nét riêng của bức ảnh — thứ người dùng nhiều khả năng nhắc tới nhất — đứng trước; thông tin chung
+    chung mà ảnh nào cũng có đứng sau. Chưa xếp hạng xuyên trường: <code>field_priority</code> đặt sẵn
+    bằng 1, sau này có thể cho LLM chấm lại thành 2–3 mà không đổi schema.
+  </div>
 
-  <div class="ex-lbl">Ví dụ — phân rã một desc có thật</div>
-<pre>desc gốc (24 từ):
-  "A long purple wooden boat positioned horizontally across the center of the frame,
-   serving as a floating restaurant with cooking equipment and passengers aboard."
+  <div class="ex-lbl">Ví dụ — phân rã trên ảnh chợ nổi Cái Răng</div>
+<pre>desc (24 từ): "A long purple wooden boat positioned horizontally across the center of the
+               frame, serving as a floating restaurant with cooking equipment and passengers aboard."
+→ chiếc thuyền · màu tím · bằng gỗ · là quán ăn nổi · dài · nằm ngang giữa khung hình · có khách trên thuyền
 
-→ f0  chủ thể : chiếc thuyền        (hạng 0 — luôn giữ)
-  f1  thuộc tính: màu tím            (hạng 1)
-  f2  thuộc tính: bằng gỗ            (hạng 2)
-  f3  thuộc tính: là quán ăn nổi     (hạng 3)
-  f4  thuộc tính: dài                (hạng 4)
-  f5  vị trí   : nằm ngang giữa khung (hạng 5)
-  f6  thuộc tính: có khách trên thuyền (hạng 6)</pre>
+photo      "top-down aerial, wide shot, deep focus"
+→ chụp từ trên không · nhìn thẳng từ trên xuống · toàn cảnh · lấy nét sâu
+  ("top-down aerial" không có dấu phẩy nhưng là 2 ý)
 
-  <p><span class="muted">Tập mệnh đề còn sống sót sau khi cắt chính là
-  <strong>checklist chấm điểm</strong> ở bước 5 — nên đơn vị chấm điểm là <em>mệnh đề</em>,
-  không phải cả <code>desc</code>.</span></p>
+lighting   "bright daylight with soft shadows"  → ánh sáng ban ngày · trời sáng rõ · bóng đổ mềm
+aesthetics "documentary, vibrant"               → sống động · phong cách phóng sự
+background "The surface of a wide, murky brown river fills the frame."
+→ mặt sông · rộng · nước nâu đục · lấp đầy khung hình</pre>
+
+  <p><span class="muted">Code kiểm tra đầu ra: đủ facts cho mọi element, có
+  <code>background_facts</code>, có đúng các trường style đang có (bắt nhầm <code>photo</code> ↔
+  <code>art_style</code>, lỡ phân rã <code>medium</code>). Cache sinh từ schema cũ tự bị gọi lại.</span></p>
 </div>
 
 <!-- ---------- STEP 1b ---------- -->
 <div class="step">
   <div class="step-head">
     <span class="num">1b</span>
-    <span class="step-title">Lắp <code>sub_json</code> — nén theo 2 trục</span>
-    <span class="step-note">code thuần · có seed</span>
+    <span class="step-title">LLM chọn lọc <code>sub_json</code> cho short / medium / long</span>
+    <span class="step-note">LLM · 1 lần gọi cho cả 3 mức · cache</span>
   </div>
 
   <div class="io">
     <div class="in">
       <div class="lbl">Đầu vào</div>
-      <ul><li><code>target_json</code> + kết quả bước 1a</li></ul>
+      <ul><li>Bản phân rã của 1a, sắp lại theo nhóm</li>
+          <li>Chủ thể bắt buộc (rút từ tên file)</li></ul>
     </div>
     <div class="out">
       <div class="lbl">Đầu ra</div>
-      <ul><li>3 <code>sub_json</code> (short / medium / long)</li></ul>
+      <ul><li>3 <code>sub_json</code> + checklist, lồng nhau short ⊆ medium ⊆ long</li></ul>
     </div>
   </div>
 
-  <div class="callout">
-    <div class="t">Phải nén cả hai trục, không chỉ một</div>
-    Chỉ cắt bớt số lượng element là <strong>chưa đủ</strong>. Vì mỗi <code>desc</code> dài trung bình
-    19 từ, một prompt "short" giữ 2 element vẫn ra ~38 từ — đặc như JSON, không giống người viết.
-    <br><br>
-    <strong>Trục bề rộng</strong> — giữ bao nhiêu nhóm khái niệm.<br>
-    <strong>Trục chiều sâu</strong> — mỗi element giữ bao nhiêu mệnh đề.
-  </div>
-
+  <h3>Định nghĩa ba mức — theo nội dung, không theo số từ</h3>
   <table>
-    <tr><th style="width:20mm">Mức</th><th style="width:46mm">Bề rộng</th><th>Chiều sâu</th>
-        <th style="width:24mm">Độ dài</th></tr>
+    <tr><th style="width:18mm">Mức</th><th>Độ phủ</th><th style="width:36mm">Độ sâu</th><th>Loại thông tin</th>
+        <th style="width:14mm">Trần</th></tr>
     <tr><td><strong>short</strong></td>
-        <td>Nhóm chính + tối đa <strong>2</strong> nhóm văn hoá Việt + mọi chữ trong ảnh</td>
-        <td>Chỉ chủ thể + 1 thuộc tính <span class="muted">(f0–f1)</span>; mỗi nhóm tối đa
-            <strong>2</strong> thành viên (nhóm chính: 3)</td>
-        <td>8–20 từ</td></tr>
+        <td>Chỉ <strong>chủ thể chính</strong>, bỏ qua phần còn lại của ảnh</td>
+        <td>Tối đa 2 ý: thuộc tính nổi bật nhất, <em>hoặc</em> 1 bối cảnh/địa điểm có bản sắc</td>
+        <td>Chủ thể (+ thuộc tính / địa điểm). Không bối cảnh chung chung, không style</td>
+        <td>16 từ</td></tr>
     <tr><td><strong>medium</strong></td>
-        <td>40–60% số nhóm, tối đa <strong>3</strong> nhóm văn hoá, thêm gợi ý bối cảnh</td>
-        <td>1–2 thuộc tính mỗi element; mỗi nhóm tối đa <strong>4</strong> thành viên
-            (nhóm chính: 5)</td>
-        <td>30–60 từ</td></tr>
+        <td>Chủ thể chính + 1–3 nhóm phụ quan trọng + bối cảnh chính</td>
+        <td>Chủ thể 2–4 thuộc tính; nhóm phụ 1–2</td>
+        <td>+ bố cục, quan hệ; tối đa 1 ý style <em>chỉ khi đáng chú ý</em></td>
+        <td>50 từ</td></tr>
     <tr><td><strong>long</strong></td>
-        <td>55–95% số nhóm <span class="muted">(ngẫu nhiên)</span>, không giới hạn nhóm văn hoá</td>
-        <td>2–3 thuộc tính; riêng chủ thể chính giữ gần đủ; không giới hạn số thành viên/nhóm</td>
-        <td>100–200 từ</td></tr>
+        <td>Gần như toàn bộ ảnh</td>
+        <td>Thuộc tính sâu, vị trí, hành động</td>
+        <td>+ bối cảnh chi tiết, ánh sáng, góc máy, phong cách</td>
+        <td>—</td></tr>
   </table>
 
-  <p><span class="muted">Đuôi 95% của mức <em>long</em> chính là tình huống user viết cực chi tiết —
-  khi đó việc của model gần như chỉ là bóc tách và dựng lại JSON. Đây là một điểm trên phổ,
-  không phải một chế độ riêng.</span></p>
+  <p><span class="muted">Địa điểm có bản sắc (Hồ Tây, phố cổ Hội An, cánh đồng lúa) được phép vào
+  short vì nó thường là một phần ý định chính của người dùng; bối cảnh chung chung (mặt bàn gỗ, phông
+  nền trắng) thì không. Địa điểm có thể nằm trong <code>background</code> hoặc trong một nhóm văn hoá
+  — short lấy từ một nguồn, không lấy cả hai.</span></p>
 
   <div class="callout">
-    <div class="t">Khoảng từ mục tiêu có chuẩn tham chiếu nào không?</div>
-    Đã research: không có benchmark học thuật/công nghiệp nào định nghĩa "short/medium/long"
-    theo số từ cố định — các mốc phổ biến trên blog prompt engineering chỉ là quy ước, không
-    phải kết quả đo đạc. Đáng chú ý: paper <em>"Harnessing Caption Detailness for Data-Efficient
-    Text-to-Image Generation"</em> (arXiv 2505.15172, 5/2025) phê phán chính cách chọn dữ liệu
-    theo độ dài, đề xuất đo "detailness" bằng <strong>Image Coverage Rate × Average Object
-    Detailness</strong> — về bản chất là <strong>breadth × depth</strong>, đúng hai trục pipeline
-    này đã tự chọn từ đầu. Kết luận: hướng hai-trục hiện tại đã khớp tinh thần nghiên cứu mới
-    nhất; khoảng từ mục tiêu (8-20/30-60/100-200) vẫn là tham số tự hiệu chỉnh bằng dữ liệu thật,
-    không có "con số chuẩn" để tra cứu thay thế.
+    <div class="t">Cơ sở của định nghĩa — không có chuẩn công bố, nhưng các nguồn hội tụ</div>
+    Không có nghiên cứu nào định nghĩa chuẩn "user prompt short/medium/long". Các nguồn gần nhất đều
+    định nghĩa mức chi tiết bằng <strong>độ phủ × độ sâu × loại thông tin</strong>, không bằng số từ:
+    <ul style="margin:1.5mm 0 0; padding-left:4.5mm">
+      <li><strong>Z-Image</strong> (2511.22699): <em>simulated user prompt</em> chỉ nói phần user quan
+          tâm, "không nhắc tới phần còn lại của ảnh" — khác <em>short caption</em> vốn tả toàn diện.</li>
+      <li><strong>Caption Detailness</strong> (2505.15172): đo bằng Image Coverage Rate × Average Object
+          Detailness; chỉ ra độ dài là thước đo kém.</li>
+      <li><strong>LongCat-Image</strong> (2512.07584): 4 mức Entity → Phrase → Composition →
+          Photographic, phân theo loại nội dung.</li>
+      <li><strong>PartiPrompts</strong>: Basic → Simple Detail → Fine-grained Detail → Complex.</li>
+      <li><strong>Prompt Expansion</strong> (ACL 2024): tách riêng trục trừu tượng/cụ thể khỏi trục độ
+          dài. <span class="muted">Dữ liệu sinh ngược từ ảnh thật nên mọi prompt đều cụ thể — prompt
+          trừu tượng kiểu "không khí Tết ấm cúng" nằm ngoài phạm vi.</span></li>
+    </ul>
   </div>
 
-  <div class="callout">
-    <div class="t">Sự cố thực tế: short/medium dài hơn hẳn mục tiêu</div>
-    Chạy thử trên dữ liệu server cho thấy prompt <em>short</em> ra tới ~22 từ (mục tiêu 8–20),
-    <em>medium</em> có lúc chạm 88 từ (mục tiêu 30–60). Nguyên nhân không phải ở bước 2a mà ở
-    checklist quá to do bước 1b lắp ra. Ba lỗi cụ thể:
-    <br><br>
-    <strong>1. Nhóm "bao trọn" bị giữ hết chỉ vì lẫn một mẩu chữ.</strong>
-    Một nhóm cảnh nền gộp 13 element không liên quan, tình cờ chứa 1 element chữ (biển hiệu) —
-    luật "giữ mọi chữ trong ảnh" khi đó kéo theo toàn bộ 13 element. Sửa: chỉ giữ đúng phần tử
-    chữ trong nhóm đó, không giữ cả nhóm.
-    <br><br>
-    <strong>2. Không có trần cho số thành viên một nhóm.</strong> Nhóm chính "ba người trên
-    thuyền thúng" một mình đóng góp 12 mệnh đề ở mức short. Sửa: thêm trần cứng theo mức
-    (bảng bên trên).
-    <br><br>
-    <strong>3. Luật "giữ mọi nhóm văn hoá" không có trần.</strong> Một ảnh có 4 nhóm được gắn
-    cờ văn hoá thì cả 4 đều lọt vào short, dù bề rộng mục tiêu của short chỉ là ~1 nhóm.
-    Sửa: thêm trần theo mức, ưu tiên giữ nhóm có độ nổi bật cao hơn (xuất hiện sớm hơn) khi
-    phải loại bớt.
-    <br><br>
-    <span class="muted">Kết quả đo lại trên 50 ảnh: short — số mệnh đề p90 15→11, max 16→15;
-    medium — p90 29→25, max 44→33. Đây là cải thiện ở checklist (đầu vào bước 2a); độ dài
-    prompt thực tế cần đo lại sau khi chạy lại bước 2a.</span>
-  </div>
+  <h3>LLM chọn, code kiểm tra</h3>
+  <p>Mỗi ảnh gọi model <strong>một lần</strong>, trả về lựa chọn cho cả ba mức — nhìn cả ba cùng lúc
+  thì đảm bảo được tính lồng nhau. Temperature 0; độ đa dạng đến từ việc định nghĩa theo
+  <em>khoảng</em> và dặn LLM chọn theo độ nổi bật thực tế của từng ảnh. Code
+  <strong>không chọn nội dung</strong>, chỉ kiểm tra:</p>
+  <table>
+    <tr><th style="width:44mm">Kiểm tra</th><th>Vì sao</th></tr>
+    <tr><td>Chép nguyên văn</td><td>Mọi mệnh đề và tên nhóm phải có sẵn trong bản phân rã — không sửa chữ, không gộp, không bịa</td></tr>
+    <tr><td>Lồng nhau</td><td>short ⊆ medium ⊆ long</td></tr>
+    <tr><td>Chủ thể bắt buộc</td><td>Nhóm khớp tên file (<code>hu_tieu_nam_vang_001001</code> → "hủ tiếu Nam Vang") có ở cả 3 mức</td></tr>
+    <tr><td>Định nghĩa short</td><td>Không style, tối đa 1 ý bối cảnh, tối đa 2 ý ngoài chủ thể</td></tr>
+    <tr><td>Trần từ</td><td>short 16, medium 50 — LLM đếm từ không chính xác nên code đếm lại</td></tr>
+  </table>
+  <p>Sai thì gọi lại <strong>kèm đúng danh sách lỗi</strong>, tối đa 2 lần. Cache gắn dấu vân tay
+  (đầu vào + system prompt): 1a đổi kết quả hoặc sửa prompt 1b thì ảnh đó tự được gọi lại.
+  <code>stats.json</code> ghi phân bố số mệnh đề theo mức để phát hiện LLM có rơi vào một khuôn cố
+  định không.</p>
+
+  <h3>Checklist được ghép thế nào</h3>
+  <ul>
+    <li>Checklist = đúng các mệnh đề LLM đã chọn, và 2a <strong>chỉ nhận đúng các mệnh đề đó</strong>.</li>
+    <li>Tên nhóm thường chỉ là nhãn (vd <em>"cảnh nền"</em>) nên <strong>không</strong> vào checklist;
+        riêng nhóm văn hoá, tên nhóm chính là nội dung nên luôn vào.</li>
+    <li>Số lượng: <code>số lượng: N</code> là một mệnh đề LLM chọn được (không chọn khi tên nhóm đã là
+        đôi/cặp/bộ). Nhóm số nhiều mà không chọn số thì 2a được báo nói mơ hồ ("mấy", "vài").</li>
+    <li><code>required_subject</code> trỏ tới mệnh đề đầu của nhóm bắt buộc — ở 2b, thiếu nó thì loại
+        ngay, không phụ thuộc <code>--max_missing</code>.</li>
+  </ul>
+
+  <div class="ex-lbl">Ví dụ — few-shot của 1b trên ảnh chợ nổi Cái Răng</div>
+<pre>short    chợ nổi Cái Răng · chiếc thuyền · bằng gỗ
+
+medium   + số lượng: 2 · màu tím · là quán ăn nổi · màu xanh
+         + người bán hàng đội nón lá · đội nón lá · đang nấu đồ ăn
+         + mặt sông · nước nâu đục
+         + chụp từ trên không                         ← style đáng chú ý
+
+long     + dài · nằm ngang giữa khung hình · có khách trên thuyền · chở khách ngồi thành hàng
+         + những người bán hàng · cái xô nhựa · màu đỏ · trên boong thuyền
+         + rộng · lấp đầy khung hình
+         + nhìn thẳng từ trên xuống · toàn cảnh · ánh sáng ban ngày · trời sáng rõ · sống động
+         (bỏ "lấy nét sâu", "bóng đổ mềm" vì chung chung)</pre>
 
   <div class="callout">
-    <div class="t">Sự cố thực tế: checklist scene mâu thuẫn với chính luật cấm ở bước 2a</div>
-    Chạy full pipeline (<code>test_5</code>, 100 ảnh) cho thấy tỉ lệ đạt ở bước 2b chỉ
-    63% (medium) và 62% (long) — thấp hơn hẳn short (77%). Soi 98 prompt bị loại: <strong>80%
-    bị loại vì lý do liên quan tới scene</strong> (loại ảnh / góc chụp), gồm hai nguyên nhân:
+    <div class="t">Vì sao bỏ bản 1b dùng rule</div>
+    Bản cũ nén bằng code: tỉ lệ nhóm theo mức, rank mệnh đề tối đa, và dựng <em>scene</em> bằng cách
+    cắt chuỗi tiếng Anh thô của <code>style_description</code>/<code>background</code>. Qua test_5 và
+    test_6 (tỉ lệ đạt 2b tốt nhất 83% / 70% / 66%), phần lớn lượt loại là <strong>loại oan do checklist
+    hỏng</strong>, không phải do 2a viết sai. Bốn lớp lỗi, lớp nào cũng đã vá bằng rule và vẫn hở:
     <br><br>
-    <strong>1. <code>loai_anh = "photograph"</code> chiếm 994/1000 mẫu (99,4%)</strong> —
-    gần như hằng số, không phân biệt được gì, nhưng checklist vẫn bắt buộc phải nhắc tới →
-    44/98 lượt loại chỉ vì "thiếu photograph", dù không có người dùng thật nào tự nhiên nói
-    "đây là một bức ảnh".
+    <strong>1. Không phân biệt mặc định với đáng nói.</strong> <em>"eye-level medium shot"</em>,
+    <em>"photograph"</em> vào checklist; 2a (bị cấm ngôn ngữ khung hình) viết đúng mà vẫn bị loại.
+    Vá bằng danh sách từ khoá — nhưng dữ liệu viết dính liền "eye-level wide shot" nên vẫn lọt.<br>
+    <strong>2. Cắt theo số từ, không theo ý.</strong> <em>"...hints of a"</em>, <em>"...flanked by"</em>.
+    Vá bằng danh sách giới từ treo — vẫn lọt <em>"...from the upper left casting"</em>.<br>
+    <strong>3. Không phân biệt câu với danh sách tag.</strong> <em>"warm, traditional, still life"</em>
+    thành một mệnh đề bắt buộc — 71% prompt long bị loại vì lỗi này. Vá bằng lấy tag đầu — nhưng tag
+    đầu phổ biến nhất lại là <em>documentary</em> (thể loại, không phải không khí).<br>
+    <strong>4. Không phân biệt bản chất trường.</strong> <code>art_style</code> bị lọc bằng từ khoá góc
+    máy nên <em>"woodblock print style"</em> của 6/6 tranh Đông Hồ bị vứt ở mọi mức.
     <br><br>
-    <strong>2. <code>goc_chup</code> lấy nguyên văn cụm kỹ thuật tiếng Anh</strong> (vd
-    "eye-level medium shot, sharp focus") — trong khi chính hệ thống prompt ở bước 2a lại
-    <em>cấm</em> dùng ngôn ngữ kỹ thuật khung hình. Model làm đúng (bỏ qua), nhưng bị 2b
-    chấm sai vì checklist đòi đúng cụm kỹ thuật đó — hai bước tự mâu thuẫn nhau.
-    <br><br>
-    Sửa: chỉ đưa <code>loai_anh</code> vào checklist khi khác giá trị mặc định
-    ("photograph"); chỉ đưa <code>goc_chup</code> vào khi câu tả chứa từ khoá góc máy
-    <em>đáng chú ý</em> (high-angle, low-angle, aerial, close-up, wide shot...) — bỏ hẳn
-    khi chỉ là góc mặc định (eye-level, medium shot, deep/sharp focus).
-  </div>
-
-  <div class="callout">
-    <div class="t">Hai sự cố tiếp theo phát hiện ở test_6 (sau khi sửa scene ở trên)</div>
-    Chạy lại full pipeline: pass rate nhích lên 83%/70%/66% (short/medium/long) — đỡ hơn
-    hẳn nhưng vẫn còn hai lỗi hẹp:
-    <br><br>
-    <strong>1. Dữ liệu gốc ghi góc máy không nhất quán.</strong> Có ảnh viết
-    "eye-level, wide shot" (tách bằng dấu phẩy), có ảnh viết dính liền
-    "eye-level wide shot" (không dấu phẩy). Ở trường hợp dính liền, việc giữ nguyên
-    cả cụm khiến "eye-level" (mặc định, bị cấm) vẫn lọt theo cùng từ khoá đáng chú ý.
-    Sửa: cắt bỏ các từ mặc định (eye-level) ra khỏi cụm trước khi đưa vào checklist,
-    chỉ giữ lại đúng phần đáng chú ý ("wide shot").
-    <br><br>
-    <strong>2. Ràng buộc số lượng sai khi tên nhóm đã là danh từ tập hợp/cặp.</strong>
-    Với nhóm tên "đôi đũa" (đã tự mang nghĩa "một cặp") có 2 member, code từng ghép
-    thẳng "số lượng: 2 đôi đũa" — đọc thành "2 <em>cặp</em> đũa" (4 chiếc), trong khi
-    ảnh chỉ có đúng 1 đôi (2 chiếc). Bug lộ rõ nhất ở ảnh Cầu Vàng: "đôi bàn tay đá
-    khổng lồ" chỉ có 1 đôi (2 bàn tay) nhưng checklist ghi "2 đôi bàn tay" — sai và
-    không ai đặt hàng ảnh lại nói câu này. Sửa: bỏ hẳn ràng buộc số lượng khi tên
-    nhóm bắt đầu bằng một danh từ tập hợp (đôi/cặp/bộ/cụm...).
-  </div>
-
-  <div class="callout">
-    <div class="t">Soi lại toàn bộ 81 lượt loại ở test_6 theo đúng nguồn gốc mệnh đề</div>
-    Hai fix trên chỉ chạm tới một phần nhỏ. Đối chiếu từng mệnh đề "thiếu" với đúng
-    trường gốc của nó (<code>lighting</code> / <code>photo</code> / <code>aesthetics</code> /
-    <code>background</code>) cho bức tranh đầy đủ hơn:
-    <pre style="margin:2mm 0">nguồn                    số lượt   số prompt dính
-group_fact (nội dung element)  210         37
-boi_canh (bối cảnh nền)         40         40
-anh_sang (ánh sáng)             39         39
-khong_khi (aesthetics)          24         24   ← chỉ ở long
-goc_chup (góc máy)              18         18
-số lượng                         8          8</pre>
-    27/81 prompt bị loại <strong>chỉ vì</strong> scene (không dính lỗi nội dung khác) —
-    riêng nhóm này sửa xong đã cứu được khoảng 1/3. Đào tiếp hai nguồn lớn nhất lộ ra
-    2 vấn đề nữa:
-    <br><br>
-    <strong>1. Cắt cứng theo số từ để lại cụm cụt (bug thật).</strong>
-    <code>first_clause()</code> áp dụng cho bối cảnh nền (medium) từng cắt giữa câu, ví dụ
-    <em>"...framed by a heavy brown wooden door frame on the"</em> — mất chữ "left", cụt
-    lửng. Không ai viết prompt lại chèn một câu bị cắt cụt như vậy. Sửa: sau khi cắt theo
-    số từ, lùi lại bỏ các từ chức năng (giới từ/mạo từ: on, the, of, by...) còn treo lơ
-    lửng ở cuối.
-    <br><br>
-    <strong>2. <code>khong_khi</code> (aesthetics) là danh sách tag mood tiếng Anh rời
-    rạc</strong> (vd "elegant, historical, serene"), không phải câu mô tả — gây 71% prompt
-    long bị loại (24/34). Sau khi hỏi ý kiến, quyết định: chỉ giữ MỘT tag nổi bật nhất làm
-    gợi ý văn phong cho bước 2a viết, và <strong>không đưa vào checklist chấm điểm</strong>
-    ở bước 2b nữa — giống cách xử lý "loai_anh"/"goc_chup" mặc định.
-    <br><br>
-    <span class="muted">Phần còn lại (210 lượt "group_fact", 37 prompt) là nội dung cốt lõi
-    của element — màu sắc, chất liệu, vị trí — nhiều khả năng là chất lượng viết thật của
-    model (đúng việc bước 2b cần bắt), không phải lỗi pipeline; chưa thấy mẫu hình hệ thống
-    nào đáng sửa thêm ở đây.</span>
-  </div>
-
-  <div class="callout">
-    <div class="t">Toàn bộ fix ở trên đều sửa checklist (1b) — chưa sửa lời dặn cho model (2a)</div>
-    Mọi fix từ đầu tới giờ đều nằm ở <strong>bước 1b</strong> (thay đổi checklist — cái gì
-    được coi là "đúng"), chưa đụng tới <strong>STEP2A_SYSTEM</strong> (lời dặn thật sự đưa
-    cho model viết prompt). Soi lại thấy một lỗ hổng thật ở đó:
-    <code>anh_sang</code>/<code>boi_canh</code> vẫn bị thiếu thường xuyên ngay cả ở mức
-    <em>long</em> (dư từ, không phải do hết ngân sách) — vì system prompt chỉ
-    <strong>cấm THÊM</strong> tin ngoài bản mô tả, chưa từng nói rõ phải <strong>nhắc đủ</strong>
-    mọi mệnh đề được cho. Model có thể tự ý bỏ bớt ánh sáng/bối cảnh mà không phạm luật nào.
-    <br><br>
-    Sửa: thêm một dòng bắt buộc — "phải nhắc đến đầy đủ mọi mệnh đề được cho, kể cả scene;
-    được diễn đạt lại tự nhiên hơn nhưng không được bỏ sót". Bốn ví dụ few-shot đã sẵn làm
-    đúng việc này (đều nhắc đủ phần scene của chính nó) nên không cần sửa, chỉ cần nói rõ
-    thành luật tường minh để model khái quát đúng cho những trường hợp ngoài few-shot.
-  </div>
-
-  <div class="ex-lbl">Ví dụ — cùng một ảnh, hai mức nén</div>
-<pre>Ảnh gốc: chợ nổi Cái Răng — 7 element, trong đó có cả một
-         element 17 từ tả "cái xô nhựa đỏ trên boong thuyền"
-
-short    bề rộng: giữ 1 nhóm "thuyền" + nhóm văn hoá "Chợ nổi Cái Răng"
-         chiều sâu: f0-f1
-         → checklist chỉ có 3 mệnh đề: chợ nổi Cái Răng · thuyền gỗ · chụp từ trên cao
-
-long     bề rộng: giữ 4/7 nhóm  (xô nhựa, sọt trái cây bị loại)
-         chiều sâu: f0-f3
-         → checklist ~14 mệnh đề</pre>
-
-  <div class="callout">
-    <div class="t">Hệ quả: đơn vị chấm điểm là mệnh đề</div>
-    Vì chiều sâu bị cắt nên <code>desc</code> không còn nguyên văn. Thay vì hỏi
-    <em>"element e0 có xuất hiện không"</em>, ta hỏi từng mệnh đề một:
-    <em>"có thuyền không? · có màu tím không?"</em>
-    <br><br>
-    Ở mức short, checklist chỉ có "thuyền gỗ" — nên model tự thêm "quán ăn nổi, có người
-    đội nón lá đang nấu" <strong>không bị trừ điểm</strong>, ngược lại còn được tính vào
-    chỉ số Độ dày.
-  </div>
-
-  <div class="callout">
-    <div class="t">Ba lỗi lắp checklist đã sửa (phát hiện từ dữ liệu server thật)</div>
-    <strong>Thiếu thông tin cảnh (scene).</strong> <code>loại ảnh / góc chụp / ánh sáng / không
-    khí / bối cảnh</code> được đưa vào bước 2a để viết prompt nhưng ban đầu không được đưa vào
-    checklist — bước 2b lọc dựa trên checklist thiếu này nên cứ thấy prompt nhắc tới ánh sáng,
-    góc chụp... là báo "thêm tin" oan. Tỉ lệ đạt rơi từ ~60% xuống 4–8%. Sửa bằng cách luôn thêm
-    giá trị scene vào checklist.
-    <br><br>
-    <strong>Trùng chủ thể giữa các thành viên trong nhóm bị xoá nhầm.</strong> Khi hai thành viên
-    một nhóm có cùng danh từ chủ thể (hai "người phụ nữ", hai "bông tai vàng"), bước lắp checklist
-    từng khử trùng theo văn bản trên toàn nhóm — làm mất luôn danh từ chủ thể của thành viên thứ
-    hai, để lại một thuộc tính mồ côi không chủ thể. Model viết đúng (dùng <code>cardinality</code>
-    để suy ra "một cô khác") nhưng bị chấm sai vì checklist thiếu. Sửa: bỏ khử trùng liên-thành-viên,
-    mỗi thành viên giữ đủ mệnh đề của riêng nó.
-    <br><br>
-    <strong>Tên nhóm văn hoá bị rơi khỏi checklist khi nhóm đã có sẵn mệnh đề khác.</strong> Tên
-    riêng của nhóm văn hoá (vd "thanh đồng trong lễ Hầu đồng") trước đây chỉ được thêm vào checklist
-    khi nhóm đó <em>không có mệnh đề nào khác</em> — nếu nhóm đã có 8 mệnh đề từ các element con thì
-    tên nhóm không bao giờ vào checklist, dù model viết đúng tên vẫn bị báo "thêm tin". Sửa: nhóm
-    văn hoá luôn có tên trong checklist, bất kể đã có mệnh đề khác hay chưa.
-  </div>
-
-  <div class="callout">
-    <div class="t">Xung đột thật: luật "PHẢI ĐẦY ĐỦ" (bước 2a) vs ngân sách từ short/medium</div>
-    Sau khi bước 2a được yêu cầu phải nhắc đủ mọi mệnh đề (xem callout tương ứng ở bước 2a), đo
-    lại checklist short trên <code>test_6</code>: tổng số từ cộng dồn của các mệnh đề
-    <strong>p50=19, p90=30, max=44 từ</strong> — trong khi <code>length_hint</code> short chỉ
-    8-20 từ. Ở đuôi phân phối, checklist đòi hỏi nhiều hơn hẳn những gì một câu 20 từ có thể
-    chứa được, bất kể diễn đạt cô đọng cỡ nào — mâu thuẫn trực tiếp với luật "phải nhắc đủ".
-    Nguyên nhân: các trần trước đó (<code>group_element_cap</code>, <code>max_cultural_groups</code>,
-    <code>element_cap</code>) đều giới hạn theo <em>số element/nhóm</em>, chưa có trần trực tiếp
-    theo <em>tổng số từ</em>.
-    <br><br>
-    Sửa: thêm <code>max_checklist_words</code> theo mức (short: 16, medium: 50, long: không giới
-    hạn) — sau khi lắp xong checklist đầy đủ, cắt bớt theo đúng thứ tự ưu tiên GIỮ (mệnh đề nhóm
-    theo salience → dòng "số lượng" → scene), không bao giờ cắt một nhóm xuống dưới 1 mệnh đề (vì
-    2a vẫn thấy tên nhóm đó qua trường "name", nên checklist phải còn ít nhất một mệnh đề tương
-    ứng để không chấm oan). Kết quả đo lại: short p90/max còn đúng 16 từ; medium còn đúng 50 từ.
-  </div>
-
-  <div class="callout">
-    <div class="t">Chủ thể chính bắt buộc — tín hiệu độc lập rút từ TÊN FILE</div>
-    <code>required_group_index</code> = việc "nhóm nào là chủ thể chính" hiện chỉ dựa vào salience
-    do step1a (LLM) tự xếp — nếu step1a lỡ xếp sai, không có gì đảm bảo checklist còn giữ đúng
-    chủ thể chính (vd "hủ tiếu Nam Vang", "rước kiệu"). Tên file trong bộ dữ liệu này lại chính là
-    slug không dấu của chủ thể chính thật (<code>ruoc_kieu_002128.json</code> →
-    "rước kiệu", <code>hu_tieu_nam_vang_001001.json</code> → "hủ tiếu Nam Vang") — một tín hiệu
-    <strong>độc lập với salience của step1a</strong>.
-    <br><br>
-    Dùng tín hiệu này để: (1) ép nhóm khớp filename luôn được giữ ở mọi mức, kể cả khi nó không
-    phải nhóm chính và không phải nhóm văn hoá theo step1a; (2) đưa mệnh đề rank-0 của nhóm đó vào
-    <code>required_subject</code> — ở bước 2b, thiếu đúng mệnh đề này thì <strong>loại ngay lập
-    tức, không phụ thuộc <code>--max_missing</code></strong>. Không có ràng buộc riêng này thì
-    việc nới lỏng <code>--max_missing</code> để giảm tỉ lệ loại có thể vô tình cho lọt đúng trường
-    hợp nguy hiểm nhất: prompt thiếu hẳn chủ thể chính nhưng vẫn đạt vì mọi mệnh đề thiếu được xét
-    ngang hàng nhau.
-    <br><br>
-    <span class="muted">Không đổi thứ tự nhóm (group 0 vẫn do step1a quyết định) — chỉ thêm một
-    ràng buộc riêng, độc lập, để tránh rủi ro reorder nhầm khi slug khớp nhầm nhóm.</span>
+    Cả bốn đều là việc cần hiểu ngôn ngữ. Bằng chứng rõ nhất: <code>desc</code> cũng là văn tả tự do
+    nhưng không dính lỗi nào — chỉ vì nó đi qua LLM ở 1a trước. Nên chuyển toàn bộ sang LLM: 1a phân rã
+    mọi trường, 1b chọn lọc.
   </div>
 </div>
-
 
 <!-- ---------- STEP 2a ---------- -->
 <div class="step">
@@ -559,7 +472,7 @@ long     bề rộng: giữ 4/7 nhóm  (xô nhựa, sọt trái cây bị loại
   <div class="io">
     <div class="in">
       <div class="lbl">Đầu vào</div>
-      <ul><li><code>sub_json</code> + <code>persona</code></li></ul>
+      <ul><li>Các mệnh đề của <code>sub_json</code> + <code>persona</code></li></ul>
     </div>
     <div class="out">
       <div class="lbl">Đầu ra</div>
@@ -575,31 +488,29 @@ long     bề rộng: giữ 4/7 nhóm  (xô nhựa, sọt trái cây bị loại
     System prompt phải chặn đúng các hành vi đó.
   </div>
 
-  <h3>System prompt</h3>
+  <p>Bản mô tả đưa cho model chứa <strong>đúng các mệnh đề trong checklist, không hơn</strong>:
+  <code>groups</code> (mệnh đề từng nhóm, cờ <code>so_nhieu</code>), <code>boi_canh</code>,
+  <code>phong_cach</code>. Không đưa tên nhóm thô — nếu không model sẽ nhắc tới nhãn "cảnh nền" và bị
+  2b chấm là thêm tin.</p>
+
+  <h3>System prompt (rút gọn)</h3>
 <pre>Bạn đang đóng vai NGƯỜI DÙNG muốn nhờ AI tạo một tấm ảnh.
-Bạn được cho một bản mô tả có cấu trúc. Hãy viết ra CÂU YÊU CẦU của bạn.
 
 BẮT BUỘC
-- Viết như người ĐANG ĐẶT HÀNG một bức ảnh chưa tồn tại,
-  KHÔNG phải người đang mô tả một bức ảnh có sẵn.
+- Viết như người ĐANG ĐẶT HÀNG một bức ảnh chưa tồn tại.
 - Chỉ nói những gì có trong bản mô tả. Cấm thêm thông tin mới.
+- PHẢI nhắc ĐẦY ĐỦ mọi mệnh đề — trong groups, boi_canh và phong_cach.
+  Được diễn đạt lại, gộp ý; KHÔNG được bỏ sót.
 - Giữ NGUYÊN VĂN thuật ngữ tiếng Việt (áo dài, bánh tét, chợ nổi Cái Răng...).
-- Độ dài: {8-20 | 30-60 | 100-200} từ.
+- "số lượng: N" thì nói đúng số; nhóm "so_nhieu" thì nói mơ hồ, không chế số.
 
 CẤM
-- Cấm liệt kê từng vật thể thành từng mệnh đề riêng.
-  Gộp vật cùng loại: "ba chiếc thuyền gỗ", "mấy người đội nón lá".
-- Cấm ngôn ngữ kỹ thuật về khung hình: "nằm ở góc trên bên trái",
-  "chiếm phần dưới khung hình", "ở tiền cảnh".
-  User thật nói "phía sau", "bên cạnh", "ở giữa".
-- Cấm bám theo thứ tự bản mô tả. Bắt đầu bằng thứ bạn quan tâm nhất.
-- Cấm văn dịch. Viết như người Việt nói chuyện.
-- Cấm lặp một khuôn mở đầu; đa dạng cách vào câu.
+- Liệt kê từng vật thể thành từng mệnh đề riêng. Gộp: "ba chiếc thuyền gỗ".
+- Ngôn ngữ kỹ thuật khung hình: "góc trên bên trái", "ở tiền cảnh".
+- Bám thứ tự bản mô tả. Văn dịch. Lặp một khuôn mở đầu. Gạch đầu dòng.</pre>
 
-PERSONA: {vai} · {giọng} · {ngôn ngữ}</pre>
-
-  <p>Kèm <strong>3–5 ví dụ few-shot viết tay</strong>. Với nhiệm vụ bắt chước văn phong,
-  few-shot hiệu quả hơn hẳn mô tả bằng luật.</p>
+  <p>Kèm <strong>4 ví dụ few-shot viết tay</strong>, mỗi ví dụ tự nhắc đủ mệnh đề của chính nó
+  và không thêm gì (có test tự động kiểm tra điều này).</p>
 
   <h3>Persona điều khiển những gì</h3>
   <table>
@@ -610,49 +521,29 @@ PERSONA: {vai} · {giọng} · {ngôn ngữ}</pre>
   </table>
 
   <p><span class="muted">Persona chỉ đổi cách viết, không đổi nội dung — nên cùng một
-  <code>sub_json</code> với 5 persona khác nhau sẽ cho 5 prompt khác nhau nhưng
-  <strong>chung một thước đo chấm điểm</strong>.</span></p>
+  <code>sub_json</code> với các persona khác nhau vẫn <strong>chung một checklist chấm điểm</strong>.</span></p>
 
-  <div class="ex-lbl">Ví dụ — trên ảnh chợ nổi Cái Răng có thật (7 element)</div>
-<pre>short   "Ảnh chụp từ trên cao chợ nổi Cái Răng với mấy chiếc thuyền gỗ"     (13 từ)
+  <div class="ex-lbl">Ví dụ — few-shot trên ảnh chợ nổi Cái Răng</div>
+<pre>short   "Ảnh chợ nổi Cái Răng với mấy chiếc thuyền gỗ"                         (10 từ)
 
-medium  "Chụp từ flycam chợ nổi Cái Răng trên sông nước đục, ba chiếc thuyền
-         gỗ neo gần nhau, một chiếc màu tím bán đồ ăn, mấy người đội nón lá
-         đang nấu nướng."                                                   (36 từ)
+medium  "Chụp từ flycam chợ nổi Cái Răng trên mặt sông nước đục, ba chiếc thuyền
+         gỗ, trong đó một chiếc màu tím làm quán ăn nổi, mấy người bán hàng đội
+         nón lá đang nấu đồ ăn."                                                 (37 từ)
 
-long    "Mình muốn ảnh chụp từ trên cao cảnh chợ nổi Cái Răng. Mặt sông rộng
-         màu nâu đục chiếm gần hết khung hình. Ở giữa là chiếc thuyền gỗ dài
-         màu tím làm quán ăn nổi, có người đội nón lá đang nấu. Bên trên là
-         thuyền chở đầy sọt trái cây, phía dưới là chiếc thuyền xanh chở
-         khách ngồi thành hàng."                                            (68 từ)
-</pre>
-
-  <p><strong>Ba hành vi người thật, đọc ra được từ chính ví dụ trên:</strong></p>
-  <table>
-    <tr><th style="width:34mm">Hành vi</th><th>Trong ví dụ</th></tr>
-    <tr><td>Gộp, không liệt kê</td>
-        <td>"ba chiếc thuyền gỗ" — JSON tả riêng từng chiếc thành 3 element</td></tr>
-    <tr><td>Bỏ hẳn đồ vặt</td>
-        <td>Cái xô nhựa đỏ (element 17 từ) không xuất hiện ở bất kỳ mức nào, kể cả long</td></tr>
-    <tr><td>Đảo thứ tự tự nhiên</td>
-        <td>Chủ thể → bối cảnh → không khí. JSON thì background trước, element thứ tự ngẫu nhiên</td></tr>
-  </table>
+long    "Mình muốn ảnh chụp từ trên cao cảnh chợ nổi Cái Răng dưới ánh sáng ban
+         ngày. Mặt sông rộng màu nâu đục chiếm gần hết khung hình. Có một chiếc
+         thuyền gỗ dài màu tím làm quán ăn nổi, mấy người bán hàng đội nón lá đang
+         nấu đồ ăn, thêm một chiếc thuyền chở sọt trái cây và một chiếc thuyền màu
+         xanh chở khách ngồi thành hàng."                                        (69 từ)</pre>
 
   <div class="callout">
     <div class="t">Ngoài phạm vi: lỗi chính tả</div>
     Mọi prompt sinh ra ở bước này đều <strong>viết đúng chính tả, đủ dấu</strong>. Việc chịu được
     đầu vào sai chính tả, mất dấu hay viết tắt (<em>"chup anh nhom ban truoc lang bac"</em>)
-    thuộc về một <strong>mô-đun correction riêng</strong>, đặt <em>trước</em> prompt enhancer
-    trong chuỗi xử lý.
-    <br><br>
-    Lý do tách ra: nhiệm vụ chính của mô-đun này là <em>chi tiết hoá</em>. Trộn thêm nhiễu chính tả
-    vào dữ liệu huấn luyện sẽ bắt model học hai việc cùng lúc, làm nhoè cả hai và khiến
-    phần đánh giá khó quy trách nhiệm khi có lỗi.
+    thuộc về một <strong>mô-đun correction riêng</strong>, đặt <em>trước</em> prompt enhancer.
+    Trộn nhiễu chính tả vào dữ liệu huấn luyện sẽ bắt model học hai việc cùng lúc và làm nhoè
+    nhiệm vụ chính là chi tiết hoá.
   </div>
-
-  <p><strong>Kiểm soát chất lượng:</strong> chạy thử 50 mẫu và tự đọc trước khi đốt 56k lượt gọi.
-  Nếu thấy nhiều câu kiểu <em>"một chiếc thuyền gỗ dài màu tím được đặt nằm ngang ở trung tâm
-  khung hình"</em> thì system prompt còn hở — sửa rồi mới chạy tiếp.</p>
 </div>
 
 <!-- ---------- STEP 2b ---------- -->
@@ -664,37 +555,38 @@ long    "Mình muốn ảnh chụp từ trên cao cảnh chợ nổi Cái Răng.
   </div>
   <div class="io">
     <div class="in"><div class="lbl">Đầu vào</div>
-      <ul><li>cặp (<code>sub_json</code>, <code>user_prompt</code>)</li></ul></div>
+      <ul><li>cặp (checklist, <code>user_prompt</code>)</li></ul></div>
     <div class="out"><div class="lbl">Đầu ra</div>
-      <ul><li>Cặp đạt · Cặp bị loại</li></ul></div>
+      <ul><li>Cặp đạt · Cặp bị loại (kèm lý do)</li></ul></div>
   </div>
-  <p>Kiểm tra prompt không <em>thêm</em> và không <em>thiếu</em> so với <code>sub_json</code>.
-  Dự kiến loại 15–20%. Bỏ bước này thì <code>sub_json</code> hết là thước đo đáng tin,
-  và toàn bộ phần đánh giá sập theo.</p>
+  <p><strong>Chỉ chấm hai điều.</strong> <em>THIẾU</em>: mệnh đề nào trong checklist mà prompt không
+  nhắc tới (diễn đạt khác, kể cả khác ngôn ngữ, vẫn tính là có). <em>THÊM</em>: prompt nói ra vật thể,
+  màu, số lượng, chất liệu, địa điểm không có trong checklist (lời dẫn, từ nối không tính). Thiếu dù
+  1 mệnh đề hoặc thêm dù 1 thông tin là loại. Không chấm văn phong.</p>
 
-  <p><strong>Chỉ chấm hai điều: THIẾU và THÊM.</strong> Ban đầu có thêm tiêu chí "văn máy móc/
-  dịch máy" nhưng đã <strong>bỏ hẳn</strong> — không phải việc của bước lọc này, để dành cho một
-  mô-đun correction riêng nếu cần sau này.</p>
+  <div class="ex-lbl">Ví dụ thật — test_6, ảnh bánh chưng, mức medium</div>
+<pre>checklist : bánh chưng · hình vuông · gói bằng lá dong · buộc lạt tre · high-angle shot
+            · natural daylight · "The interior of a large, weathered grey metal basin ..."
+prompt    : "Chụp từ trên cao một cái thau nhôm lớn màu xám cũ bên trong có mấy cái bánh
+             chưng hình vuông gói lá dong buộc lạt tre."
+judge     : thiếu ["natural daylight"]   thêm ["thau nhôm"]   → loại
+            (checklist chỉ nói "kim loại", prompt tự chọn "nhôm" — bịa chất liệu)</pre>
 
   <div class="callout">
     <div class="t">Ngôn ngữ không quan trọng, trừ một ngoại lệ</div>
-    Giám khảo (bước 2b) <strong>không được</strong> báo thiếu/thêm chỉ vì prompt diễn đạt bằng
-    ngôn ngữ khác với mệnh đề gốc — mệnh đề ghi "bright overcast daylight", prompt viết "ánh sáng
-    ban ngày dịu, trời âm u" thì vẫn tính là đã nhắc tới.
-    <br><br>
-    <strong>Ngoại lệ duy nhất: thuật ngữ văn hoá Việt Nam</strong> (áo dài, khăn xếp, chợ nổi Cái
-    Răng, thanh đồng, lễ Hầu đồng...) — những tên này <strong>bắt buộc giữ nguyên tiếng Việt</strong>.
-    Dịch "áo dài" thành "Vietnamese dress" hay "thanh đồng" thành "shaman" vẫn bị tính là thiếu.
+    <strong>Thuật ngữ văn hoá Việt Nam</strong> (áo dài, khăn xếp, chợ nổi Cái Răng, thanh đồng...)
+    bắt buộc giữ nguyên tiếng Việt. Dịch "áo dài" thành "Vietnamese dress" vẫn bị tính là thiếu.
   </div>
 
   <div class="callout">
     <div class="t">Mệnh đề vị trí: không cần lặp tên chủ thể, nhưng giá trị vị trí phải đúng</div>
-    Một số mệnh đề vị trí lặp tên chủ thể/nhóm ở cuối câu (vd "ở tai phải thanh đồng"). Prompt viết
-    tự nhiên thường không lặp lại tên đó cho từng chi tiết — <strong>chỉ thiếu tên chủ thể lặp lại
-    thì không tính là thiếu</strong>. Nhưng phần vị trí cụ thể (trái/phải, tay/tai/cổ...) vẫn phải
-    khớp đúng: "...bông tai vàng bên tai phải" → đạt; "...bên tai trái" → sai vị trí, vẫn tính thiếu;
-    không nhắc bên nào cả → thiếu.
+    "ở tai phải thanh đồng" — prompt viết "...bông tai vàng bên tai phải" → đạt; "...bên tai trái" →
+    sai vị trí, tính thiếu; không nhắc bên nào → thiếu.
   </div>
+
+  <p><span class="muted">Nên dùng model <strong>khác họ</strong> với model sinh prompt ở 2a
+  (<code>JUDGE_BASE_URL</code> / <code>JUDGE_MODEL</code>). Cờ <code>--ignore_judge</code> tắt hẳn cổng
+  này (mọi prompt đạt) — chỉ dùng khi debug, không dùng dữ liệu đó để train.</span></p>
 </div>
 
 <!-- ---------- STEP 2b2 ---------- -->
@@ -710,25 +602,14 @@ long    "Mình muốn ảnh chụp từ trên cao cảnh chợ nổi Cái Răng.
     <div class="out"><div class="lbl">Đầu ra</div>
       <ul><li>Cặp đạt (đã sửa) · Cặp thật sự bị loại</li></ul></div>
   </div>
-  <p>Mặc định prompt bị 2b loại là <strong>mất trắng</strong>, dù phần lớn lỗi (thiếu 1-2 mệnh đề,
-  thừa 1 chi tiết) hoàn toàn sửa được thay vì phải sinh lại từ đầu. Bật <code>--retry_rejected</code>
-  (mặc định tắt) thì sau bước 2b, <code>step2b2_correct.py</code> đưa đúng lý do bị loại (thiếu gì,
-  thừa gì) cho một lượt gọi LLM sửa lại — CHỈ sửa đúng phần bị nêu lỗi, không viết lại từ đầu — rồi
-  chấm lại bằng đúng judge của 2b (kể cả ràng buộc <code>required_subject</code> ở bước trước). Đạt
-  thì gộp vào tập đạt (đánh dấu <code>corrected: true</code>, giữ <code>original_prompt</code> để
-  audit); vẫn fail thì mới thật sự loại.</p>
+  <p>Đưa đúng lý do bị loại cho LLM sửa — <strong>chỉ sửa phần bị nêu lỗi</strong>, không viết lại
+  từ đầu — rồi chấm lại bằng đúng judge của 2b. <strong>Retry đúng 1 lần.</strong> Đạt thì gộp vào tập
+  đạt (<code>corrected: true</code>, giữ <code>original_prompt</code> để audit); 2c tự phát hiện và gộp.</p>
   <div class="callout">
-    <div class="t">Retry ĐÚNG 1 lần, không lặp thêm</div>
-    Chỉ sửa một lần duy nhất rồi chấm lại — đủ cho lỗi nhỏ (thiếu/thừa 1-2 mệnh đề), chi phí thêm
-    đúng 1 lượt gọi model cho mỗi prompt bị loại, không có rủi ro lặp vô hạn.
-    <code>step2c_split.py</code> tự phát hiện và gộp <code>corrected_passed.jsonl</code> nếu bước
-    này đã chạy, không cần cấu hình gì thêm ở 2c.
-  </div>
-  <div class="callout">
-    <div class="t">Cờ liên quan: tắt hẳn cổng lọc (<code>--ignore_judge</code>)</div>
-    Thêm cờ ở bước 2b: khi bật, KHÔNG gọi judge, mọi prompt được coi là đạt — không chấm gì cả.
-    Dùng khi debug hoặc muốn tin thẳng đầu ra của 2a. Cả hai cờ (<code>--retry_rejected</code>,
-    <code>--ignore_judge</code>) đều tắt theo mặc định, không đổi hành vi cũ nếu không bật.
+    <div class="t">Lưu ý khi đưa vào train</div>
+    Prompt đã sửa được vá thêm mệnh đề nên văn phong dễ gượng. Nên dùng cho <strong>train</strong> nhưng
+    cân nhắc loại khỏi <strong>val/test</strong>, và thống kê tỉ lệ <code>corrected</code> theo mức trước
+    khi train — mức long rớt nhiều nhất nên cũng dễ có nhiều dòng sửa nhất.
   </div>
 </div>
 
@@ -740,20 +621,43 @@ long    "Mình muốn ảnh chụp từ trên cao cảnh chợ nổi Cái Răng.
     <span class="step-note">code thuần</span>
   </div>
   <div class="io">
-    <div class="in"><div class="lbl">Đầu vào</div><ul><li>Toàn bộ cặp đã lọc</li></ul></div>
+    <div class="in"><div class="lbl">Đầu vào</div><ul><li>Toàn bộ cặp đã lọc (2b + 2b2)</li></ul></div>
     <div class="out"><div class="lbl">Đầu ra</div><ul><li>train / val / test</li></ul></div>
   </div>
   <p><strong>Chia theo <code>id</code> ảnh gốc, không chia theo cặp prompt.</strong> Một ảnh sinh ra
-  3 prompt; nếu chia theo cặp thì cùng một ảnh sẽ xuất hiện ở cả tập train lẫn tập test — kết quả
-  đánh giá sẽ bị thổi phồng.</p>
+  tối đa 3 prompt; chia theo cặp thì cùng một ảnh sẽ nằm ở cả train lẫn test và điểm đánh giá bị
+  thổi phồng. Mỗi ảnh có từ 0 tới 3 prompt đạt (test_6: trung bình 2,19) — ảnh rớt cả 3 mức thì biến mất.</p>
+</div>
+
+<!-- ---------- STEP 2d ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">2d</span>
+    <span class="step-title">Chuẩn hoá nhãn Y về schema Ideogram 4</span>
+    <span class="step-note">code thuần</span>
+  </div>
+  <div class="io">
+    <div class="in"><div class="lbl">Đầu vào</div><ul><li><code>step2c_split/</code></li></ul></div>
+    <div class="out"><div class="lbl">Đầu ra</div><ul><li><code>step2d_final/</code> — <strong>dữ liệu huấn luyện</strong></li></ul></div>
+  </div>
+  <p>Bóc <code>id</code> khỏi mọi element của <code>target_json</code> và khoá lại thứ tự key. Không loại
+  dòng nào, không đụng <code>user_prompt</code>. Có kiểm tra cứng: còn sót <code>id</code> là dừng.</p>
+  <div class="callout">
+    <div class="t">Vì sao cần bước này</div>
+    <code>id</code> do step 0 gán để 1a tham chiếu element, nhưng không thuộc schema Ideogram 4. Đo trên
+    test_6: <strong>1.631 element</strong> mang <code>id</code> lọt vào nhãn Y, <code>CaptionVerifier</code>
+    của Ideogram báo <code>unknown keys ['id']</code>. Để nguyên thì model học sinh ra một key mà bộ sinh
+    ảnh chưa từng thấy lúc train. Sau 2d: <strong>0 cảnh báo</strong>.
+  </div>
 
   <div class="ex-lbl">Mỗi dòng dữ liệu huấn luyện</div>
 <pre>{
   "id": "lang_bac_004211",
   "mode": "short",
-  "user_prompt": "Ảnh chụp nhóm bạn 2 nam 1 nữ đứng trước Lăng Bác",
-  "sub_json":    { ... },   ← chỉ dùng để chấm điểm
-  "target_json": { ... }    ← NHÃN Y khi huấn luyện
+  "user_prompt": "Ảnh nhóm bạn 2 nam 1 nữ trước Lăng Bác",
+  "persona": { ... },
+  "sub_json": { "groups", "background", "style", "medium", "checklist" },  ← chỉ để chấm điểm
+  "target_json": { ... }                                                   ← NHÃN Y, không có id
 }</pre>
 </div>
 
@@ -791,13 +695,14 @@ long    "Mình muốn ảnh chụp từ trên cao cảnh chợ nổi Cái Răng.
 
   <div class="io">
     <div class="in"><div class="lbl">Đầu vào</div>
-      <ul><li>X = <code>user_prompt</code></li><li>Y = <code>target_json</code></li></ul></div>
+      <ul><li>X = <code>user_prompt</code></li><li>Y = <code>target_json</code> từ <code>step2d_final/</code></li></ul></div>
     <div class="out"><div class="lbl">Đầu ra</div><ul><li>LoRA adapter</li></ul></div>
   </div>
 
   <p><strong>Một model duy nhất</strong> (LoRA trên Qwen3.6-27B) cho cả 3 mức. Không tách 3
-  model: dữ liệu có hạn, và phần khó nhất — schema cùng kiến thức văn hoá Việt — là chung cho
-  cả ba. Code: <a href="../code/train/">code/train/</a>.</p>
+  model: không có tiền lệ nào làm vậy (FIBO, PromptEnhancer, Prompt Expansion đều một model), và
+  phần khó nhất — schema cùng kiến thức văn hoá Việt — là chung cho cả ba. Code:
+  <a href="../code/train/">code/train/</a>.</p>
 
   <div class="callout">
     <div class="t">Điểm mấu chốt của toàn bộ thiết kế</div>
@@ -811,24 +716,27 @@ long    "Mình muốn ảnh chụp từ trên cao cảnh chợ nổi Cái Răng.
 
   <div class="callout">
     <div class="t">Mỗi mức một system prompt riêng — không phải một tag chung</div>
-    Ban đầu định dùng MỘT system prompt chung, chỉ thêm một dòng
-    <code>DETAIL_LEVEL: short|medium|long</code> để phân biệt. Nhưng việc model cần làm ở mỗi
-    mức thực sự khác hẳn nhau — gộp vào một dòng tag là không đủ, nên đã đổi hướng: mỗi mức có
-    <strong>system prompt riêng biệt</strong> (chung một phần schema/luật văn hoá, khác phần
-    hướng dẫn hành vi):
+    Việc model cần làm ở mỗi mức khác hẳn nhau nên mỗi mức có <strong>system prompt riêng</strong>
+    (chung phần schema/luật văn hoá, khác phần hướng dẫn hành vi):
     <ul>
-      <li><strong>short</strong> — chỉ 8-20 từ, nêu vài ý chính. Model phải <em>tự bổ sung</em>
-          chi tiết hợp lý để JSON vẫn đầy đủ như một caption chuyên nghiệp.</li>
-      <li><strong>medium</strong> — 30-60 từ, đã nêu vài ý rõ. Giữ nguyên phần đã có, lấp phần
-          còn thiếu.</li>
-      <li><strong>long</strong> — 100-200 từ, gần đầy đủ. Việc chính là <em>cấu trúc hoá trung
-          thành</em>, hạn chế tối đa tự thêm.</li>
+      <li><strong>short</strong> — model phải <em>tự bổ sung</em> chi tiết hợp lý để JSON vẫn đầy đủ.</li>
+      <li><strong>medium</strong> — giữ nguyên phần đã có, lấp phần còn thiếu.</li>
+      <li><strong>long</strong> — <em>cấu trúc hoá trung thành</em>, hạn chế tối đa tự thêm.</li>
     </ul>
-    Hệ quả bắt buộc: <strong>ứng dụng gọi model lúc inference phải biết trước đang phục vụ mức
-    nào</strong> để chọn đúng system prompt — giống hệt lúc train. Không có cách nào để model tự
-    suy ra mức mà không lệch train/infer. Ba file system prompt (một cho mỗi mức) được lưu kèm
-    adapter sau khi train xong.
+    Hệ quả: <strong>ứng dụng lúc inference phải biết trước đang phục vụ mức nào</strong> (nút trên UI,
+    hoặc đếm từ đầu vào) để chọn đúng system prompt — giống hệt lúc train.
+    <br><br>
+    <span class="muted">Hướng có thể thử sau: FIBO fine-tune model bằng <em>control token</em> ngắn
+    (<code>&lt;generate&gt;</code>) thay cho system prompt dài; Prompt Expansion dùng <em>Prefix
+    Dropout</em> để model vừa theo được tag, vừa tự suy ra mức khi không có tag — bỏ được yêu cầu
+    ứng dụng phải biết trước mức.</span>
   </div>
+
+  <p><span class="muted">Schema trong system prompt training khớp đúng nhãn Y: không có
+  <code>id</code>, không <code>bbox</code>/<code>color_palette</code>, và ghi rõ hai thứ tự key
+  (<code>photo</code> trước <code>medium</code>, <code>art_style</code> sau <code>medium</code>).
+  Dataset hiện gần như toàn ảnh chụp (~0,6% là tranh) nên nhánh <code>art_style</code> gần như chưa
+  học được — giới hạn đã biết.</span></p>
 </div>
 
 <!-- ---------- STEP 5 ---------- -->
@@ -855,7 +763,7 @@ long    "Mình muốn ảnh chụp từ trên cao cảnh chợ nổi Cái Răng.
     </tr>
     <tr>
       <td><strong>Tính hợp lệ</strong></td>
-      <td>JSON parse được, đúng schema, không có trường cấm</td>
+      <td>JSON parse được, qua <code>CaptionVerifier</code> của Ideogram, không có trường cấm</td>
       <td class="muted">tự kiểm tra</td>
       <td>cả 3</td>
     </tr>
@@ -863,13 +771,13 @@ long    "Mình muốn ảnh chụp từ trên cao cảnh chợ nổi Cái Răng.
       <td><strong>Độ trung thành</strong></td>
       <td>Từng <em>mệnh đề</em> user đã nói có được giữ lại không.<br>
           <span class="muted">Thêm thắt KHÔNG bị trừ điểm.</span></td>
-      <td><code>sub_json</code></td>
+      <td>checklist</td>
       <td>cả 3</td>
     </tr>
     <tr>
       <td><strong>Thuật ngữ văn hoá</strong></td>
       <td>"áo dài" phải giữ nguyên, không bị dịch thành "silk dress" hay nhầm sang kimono</td>
-      <td><code>sub_json</code></td>
+      <td>checklist</td>
       <td>cả 3</td>
     </tr>
     <tr>
