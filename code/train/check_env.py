@@ -7,6 +7,7 @@ kiến trúc `qwen3_5` của Qwen3.6 không), vì số phiên bản ghi trong co
 
     python3 check_env.py                         # backend unsloth (mặc định)
     python3 check_env.py --backend hf
+    python3 check_env.py --model_name /path/to/Qwen3.6-27B   # model local -> tự bật HF_HUB_OFFLINE
     # thêm: tải tokenizer + encode vài dòng dữ liệu thật bằng đúng hàm của script train
     python3 check_env.py --data_file ../method_1/outputs/test_5_new/step2d_final/train.jsonl
 
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -151,6 +153,26 @@ def check_project_imports() -> List[Check]:
     return checks
 
 
+def check_model_dir(model_name: str) -> List[Check]:
+    """Model tải sẵn về folder local: kiểm tra đủ file mà không cần mạng."""
+    path = Path(model_name)
+    if not path.is_dir():
+        return [Check("model " + model_name, WARN,
+                      "không phải folder local -- sẽ tải từ HF Hub (server không có mạng thì hỏng)")]
+    missing = []
+    if not (path / "config.json").is_file():
+        missing.append("config.json")
+    if not any(path.glob("*.safetensors")):
+        missing.append("*.safetensors")
+    if not ((path / "tokenizer.json").is_file() or (path / "tokenizer_config.json").is_file()):
+        missing.append("tokenizer.json/tokenizer_config.json")
+    if missing:
+        return [Check("model dir " + model_name, FAIL,
+                      "thiếu {} (dùng folder snapshots/<hash>/ nếu tải bằng HF cache)".format(", ".join(missing)))]
+    size_gb = sum(f.stat().st_size for f in path.glob("*.safetensors")) / 1024 ** 3
+    return [Check("model dir " + model_name, OK, "{:.1f} GB safetensors".format(size_gb))]
+
+
 def check_data_encoding(model_name: str, data_file: str, n_rows: int) -> List[Check]:
     """Tải tokenizer (vài MB, không tải trọng số) và encode thử bằng đúng encode_record."""
     try:
@@ -217,6 +239,7 @@ def run_all(args: argparse.Namespace) -> List[Check]:
     checks += check_transformers_capabilities(args.backend)
     checks += check_gpu(args.min_vram_gb)
     checks += check_project_imports()
+    checks += check_model_dir(args.model_name)
     if args.data_file:
         checks += check_data_encoding(args.model_name, args.data_file, args.n_rows)
     return checks
@@ -244,6 +267,10 @@ def report(checks: List[Check], printer: Callable[[str], None] = print) -> bool:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args() if argv is None else parse_args_from(argv)
+    if Path(args.model_name).is_dir():
+        # Model local -> không gọi mạng. Phải đặt trước khi import unsloth/transformers/huggingface_hub.
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
     print("Kiểm tra môi trường train  (backend={}, model={})\n".format(args.backend, args.model_name))
     return 0 if report(run_all(args)) else 1
 
