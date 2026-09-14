@@ -125,7 +125,7 @@ mạng — dùng để soi prompt trước khi đốt tiền.
 ## Test
 
 ```bash
-python3 tests/test_pipeline.py       # 138 test, không chạm mạng
+python3 tests/test_pipeline.py       # 146 test, không chạm mạng
 ```
 
 Logic thuần được test đầy đủ hành vi. Phần gọi model chỉ test được những gì test
@@ -141,6 +141,15 @@ python3 tools/make_mock_decompose.py \
     --targets_file test_1/step0_normalized/targets.jsonl \
     --out_file     test_1/step1a_decompose/decompose.jsonl
 python3 step1b_build_subjson.py --out_root test_1 --dry_run
+```
+
+Thống kê prompt có chứa thuật ngữ trong tên file không (`am_tich_000755` → "ấm tích"), trên
+cả train/val/test. Phân biệt prompt làm mất thuật ngữ mà JSON gốc có (lỗi pipeline) với ảnh
+mà JSON gốc cũng không có thuật ngữ đó:
+
+```bash
+python3 tools/check_filename_term.py --out_root test_6
+# -> test_6/step2d_final/filename_term_report/{report.json, missing.jsonl}
 ```
 
 ## Hai điểm thiết kế dễ hiểu nhầm

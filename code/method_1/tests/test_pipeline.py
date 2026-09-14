@@ -622,6 +622,58 @@ class TestSubJsonSelection(unittest.TestCase):
             self.assertEqual(s1b.cached_selection(path, "abc"), GOOD_SELECTION)
 
 
+class TestFilenameTermCheck(unittest.TestCase):
+    """tools/check_filename_term.py: cụm tên file có trong prompt không (không dấu, theo từ)."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+        import check_filename_term
+        cls.tool = check_filename_term
+
+    def prefix(self, row_id, text):
+        return self.tool.matched_prefix(row_id, text)
+
+    def test_matches_without_diacritics_and_case(self):
+        self.assertEqual(self.prefix("am_tich_000755", "Cho mình bộ ẤM TÍCH men trắng"), "am tich")
+        self.assertEqual(self.prefix("am_tich_000755__short", "ấm-tích hoa lam"), "am tich")
+
+    def test_translation_is_missing(self):
+        self.assertIsNone(self.prefix("am_tich_000755", "a white ceramic teapot"))
+
+    def test_longest_prefix_tolerates_extra_filename_words(self):
+        self.assertEqual(self.prefix("hu_tieu_nam_vang_000394", "một tô hủ tiếu"), "hu tieu")
+        self.assertEqual(self.prefix("hu_tieu_nam_vang_000394", "hủ tiếu Nam Vang"), "hu tieu nam vang")
+
+    def test_single_word_prefix_is_not_enough(self):
+        self.assertIsNone(self.prefix("lan_viet_nam_001757", "múa lân"))
+
+    def test_respects_word_boundary(self):
+        self.assertIsNone(self.prefix("ao_dai_000117", "bảo đài"))
+        self.assertIsNone(self.prefix("ao_dai_000117", "áo dàii"))
+
+    def test_truncated_slug_allows_prefix_of_last_word(self):
+        self.assertEqual(self.prefix("trung_tam_thanh_pho_ho_chi_min_001772",
+                                     "trung tâm thành phố Hồ Chí Minh về đêm"),
+                         "trung tam thanh pho ho chi min")
+
+    def test_classify_separates_pipeline_loss_from_data_without_term(self):
+        target = {"compositional_deconstruction": {"elements": [{"desc": "teapot (Ấm tích)"}]}}
+        row = {"id": "am_tich_000755", "user_prompt": "a white teapot", "target_json": target}
+        self.assertEqual(self.tool.classify(row), ("thieu__target_co", "am tich"))
+        row["target_json"] = {"high_level_description": "an old man"}
+        self.assertEqual(self.tool.classify(row)[0], "thieu__target_khong_co")
+        row["user_prompt"] = "ấm tích trắng"
+        self.assertEqual(self.tool.classify(row)[0], "co_trong_prompt")
+
+    def test_classify_requires_the_longest_term_found_in_target(self):
+        row = {"id": "hu_tieu_nam_vang_000394", "user_prompt": "một tô hủ tiếu",
+               "target_json": {"high_level_description": "a bowl of Hủ tiếu"}}
+        self.assertEqual(self.tool.classify(row), ("co_trong_prompt", "hu tieu"))
+        row["target_json"] = {"high_level_description": "a bowl of Hủ tiếu Nam Vang"}
+        self.assertEqual(self.tool.classify(row), ("thieu__target_co", "hu tieu nam vang"))
+
+
 # =============================================================================
 # STEP 2a — persona & làm sạch text
 # =============================================================================
