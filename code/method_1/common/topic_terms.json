@@ -1,0 +1,1115 @@
+{
+  "_doc": {
+    "muc_dich": "Bảng chủ đề: tên thư mục (slug) -> thuật ngữ chính có dấu. CHƯA được code nào đọc.",
+    "nguyen_tac": "Chỉ bắt buộc thuật ngữ mà ảnh thật sự thể hiện. Không bắt buộc thông tin JSON không có (Nam Vang, Bát Tràng, Nhật Tân). JSON chỉ viết tiếng Anh: dịch 1-1 thì dùng thuật ngữ Việt (bamboo -> tre); thuật ngữ Việt hẹp hơn nghĩa tiếng Anh (teapot vs ấm tích) thì 1a phán.",
+    "truong": {
+      "chu_de": "chủ đề chuẩn; nhiều slug trùng nghĩa trỏ về cùng một chủ đề",
+      "thuat_ngu": "thuật ngữ chính, đúng chính tả JSON gốc dùng",
+      "dong_nghia": "prompt chứa một trong các từ này cũng tính là đã nhắc chủ thể",
+      "lien_quan": "chỉ làm ngữ cảnh, KHÔNG tính khi kiểm tra prompt",
+      "so_file_full": "số file của slug trên tập full (all_keywords_sample.txt, tổng 28.150)",
+      "json_goc_co_1k": "số file tập 1k có thuat_ngu hoặc dong_nghia (không dấu, theo từ) / số file của slug",
+      "can_1a_xac_nhan": "true khi dưới 80% JSON có thuật ngữ, hoặc ảnh có thể không thể hiện chủ đề -> 1a phải xác nhận ảnh có chủ đề này mới bắt buộc"
+    },
+    "loai": {
+      "dia_danh": "địa danh, công trình",
+      "mon_an": "món ăn, đồ uống",
+      "trang_phuc": "trang phục, phụ kiện đội/đeo",
+      "do_vat": "đồ vật, đồ dùng, phương tiện",
+      "nhac_cu": "nhạc cụ",
+      "thuc_vat": "cây, hoa",
+      "bieu_tuong": "biểu tượng, hoạ tiết, linh vật",
+      "nghe_thuat": "tranh, tác phẩm",
+      "su_kien": "sự kiện, lễ hội, nghi lễ, trò chơi, hoạt động -- chủ thể chính là CẢ CẢNH, không phải người/vật trong cảnh",
+      "canh": "cảnh thiên nhiên / đô thị không gắn một công trình cụ thể"
+    }
+  },
+  "topics": [
+    {
+      "slug": "vinh_ha_long",
+      "chu_de": "vinh_ha_long",
+      "thuat_ngu": "Vịnh Hạ Long",
+      "dong_nghia": [
+        "Hạ Long"
+      ],
+      "lien_quan": [],
+      "loai": "dia_danh",
+      "so_file_full": 1029,
+      "json_goc_co_1k": "35/35",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "banh_mi_viet_nam",
+      "chu_de": "banh_mi_viet_nam",
+      "thuat_ngu": "bánh mì",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "mon_an",
+      "so_file_full": 762,
+      "json_goc_co_1k": "13/16",
+      "can_1a_xac_nhan": false,
+      "ghi_chu": "tên file thừa 'viet nam'"
+    },
+    {
+      "slug": "banh_tet",
+      "chu_de": "banh_tet",
+      "thuat_ngu": "bánh tét",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "mon_an",
+      "so_file_full": 688,
+      "json_goc_co_1k": "19/19",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "pho_co_hoi_an",
+      "chu_de": "pho_co_hoi_an",
+      "thuat_ngu": "phố cổ Hội An",
+      "dong_nghia": [
+        "Hội An"
+      ],
+      "lien_quan": [],
+      "loai": "dia_danh",
+      "so_file_full": 630,
+      "json_goc_co_1k": "21/21",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "banh_xeo",
+      "chu_de": "banh_xeo",
+      "thuat_ngu": "bánh xèo",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "mon_an",
+      "so_file_full": 616,
+      "json_goc_co_1k": "20/20",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "cau_rong",
+      "chu_de": "cau_rong",
+      "thuat_ngu": "Cầu Rồng",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "dia_danh",
+      "so_file_full": 612,
+      "json_goc_co_1k": "17/17",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "cau_vang",
+      "chu_de": "cau_vang",
+      "thuat_ngu": "Cầu Vàng",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "dia_danh",
+      "so_file_full": 608,
+      "json_goc_co_1k": "17/17",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "ao_dai",
+      "chu_de": "ao_dai",
+      "thuat_ngu": "áo dài",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "trang_phuc",
+      "so_file_full": 543,
+      "json_goc_co_1k": "13/13",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "pho_bo",
+      "chu_de": "pho_bo",
+      "thuat_ngu": "phở bò",
+      "dong_nghia": [
+        "phở"
+      ],
+      "lien_quan": [],
+      "loai": "mon_an",
+      "so_file_full": 536,
+      "json_goc_co_1k": "14/14",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "cot_co_ha_noi",
+      "chu_de": "cot_co_ha_noi",
+      "thuat_ngu": "Cột cờ Hà Nội",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "dia_danh",
+      "so_file_full": 531,
+      "json_goc_co_1k": "13/13",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "dinh_doc_lap",
+      "chu_de": "dinh_doc_lap",
+      "thuat_ngu": "Dinh Độc Lập",
+      "dong_nghia": [
+        "Hội trường Thống Nhất"
+      ],
+      "lien_quan": [],
+      "loai": "dia_danh",
+      "so_file_full": 511,
+      "json_goc_co_1k": "18/20",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "hu_tieu_nam_vang",
+      "chu_de": "hu_tieu_nam_vang",
+      "thuat_ngu": "hủ tiếu",
+      "dong_nghia": [],
+      "lien_quan": [
+        "Nam Vang"
+      ],
+      "loai": "mon_an",
+      "so_file_full": 496,
+      "json_goc_co_1k": "19/19",
+      "can_1a_xac_nhan": false,
+      "ghi_chu": "JSON chỉ viết 'Hủ tiếu' (Nam Vang 0/19 ở tập 1k) -> không bắt buộc 'Nam Vang'"
+    },
+    {
+      "slug": "mai_vang",
+      "chu_de": "mai_vang",
+      "thuat_ngu": "hoa mai",
+      "dong_nghia": [
+        "mai vàng",
+        "cây mai"
+      ],
+      "lien_quan": [],
+      "loai": "thuc_vat",
+      "so_file_full": 491,
+      "json_goc_co_1k": "15/16",
+      "can_1a_xac_nhan": false,
+      "ghi_chu": "JSON viết 'Hoa mai (Ochna integerrima)'; 'mai vàng' 0/16 ở tập 1k"
+    },
+    {
+      "slug": "sen",
+      "chu_de": "sen",
+      "thuat_ngu": "hoa sen",
+      "dong_nghia": [
+        "sen"
+      ],
+      "lien_quan": [
+        "đầm sen"
+      ],
+      "loai": "thuc_vat",
+      "so_file_full": 490,
+      "json_goc_co_1k": "9/21",
+      "can_1a_xac_nhan": true
+    },
+    {
+      "slug": "cho_ben_thanh",
+      "chu_de": "cho_ben_thanh",
+      "thuat_ngu": "chợ Bến Thành",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "dia_danh",
+      "so_file_full": 484,
+      "json_goc_co_1k": "13/13",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "thap_rua",
+      "chu_de": "thap_rua",
+      "thuat_ngu": "Tháp Rùa",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "dia_danh",
+      "so_file_full": 480,
+      "json_goc_co_1k": "12/12",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "tam_coc_bich_dong",
+      "chu_de": "tam_coc_bich_dong",
+      "thuat_ngu": "Tam Cốc - Bích Động",
+      "dong_nghia": [
+        "Tam Cốc",
+        "Bích Động"
+      ],
+      "lien_quan": [],
+      "loai": "dia_danh",
+      "so_file_full": 472,
+      "json_goc_co_1k": "21/21",
+      "can_1a_xac_nhan": false,
+      "ghi_chu": "JSON có cả dạng thiếu dấu 'Tam Cốc - Bich Dong'"
+    },
+    {
+      "slug": "com_tam",
+      "chu_de": "com_tam",
+      "thuat_ngu": "cơm tấm",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "mon_an",
+      "so_file_full": 458,
+      "json_goc_co_1k": "19/19",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "ao_ba_ba",
+      "chu_de": "ao_ba_ba",
+      "thuat_ngu": "áo bà ba",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "trang_phuc",
+      "so_file_full": 454,
+      "json_goc_co_1k": "15/15",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "lang_chu_tich_ho_chi_minh",
+      "chu_de": "lang_chu_tich_ho_chi_minh",
+      "thuat_ngu": "Lăng Chủ tịch Hồ Chí Minh",
+      "dong_nghia": [
+        "Lăng Bác"
+      ],
+      "lien_quan": [],
+      "loai": "dia_danh",
+      "so_file_full": 454,
+      "json_goc_co_1k": "12/14",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "ca_phe_trung",
+      "chu_de": "ca_phe_trung",
+      "thuat_ngu": "cà phê trứng",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "mon_an",
+      "so_file_full": 441,
+      "json_goc_co_1k": "17/17",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "bun_cha",
+      "chu_de": "bun_cha",
+      "thuat_ngu": "bún chả",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "mon_an",
+      "so_file_full": 437,
+      "json_goc_co_1k": "13/14",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "cho_noi_cai_rang",
+      "chu_de": "cho_noi_cai_rang",
+      "thuat_ngu": "chợ nổi Cái Răng",
+      "dong_nghia": [
+        "chợ nổi"
+      ],
+      "lien_quan": [],
+      "loai": "dia_danh",
+      "so_file_full": 437,
+      "json_goc_co_1k": "20/21",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "chua_mot_cot",
+      "chu_de": "chua_mot_cot",
+      "thuat_ngu": "Chùa Một Cột",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "dia_danh",
+      "so_file_full": 435,
+      "json_goc_co_1k": "15/15",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "banh_bot_loc",
+      "chu_de": "banh_bot_loc",
+      "thuat_ngu": "bánh bột lọc",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "mon_an",
+      "so_file_full": 428,
+      "json_goc_co_1k": "17/17",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "thit_kho_trung",
+      "chu_de": "thit_kho_trung",
+      "thuat_ngu": "thịt kho trứng",
+      "dong_nghia": [
+        "thịt kho tàu"
+      ],
+      "lien_quan": [],
+      "loai": "mon_an",
+      "so_file_full": 416,
+      "json_goc_co_1k": "18/18",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "com",
+      "chu_de": "com",
+      "thuat_ngu": "cốm",
+      "dong_nghia": [
+        "xôi cốm",
+        "bánh cốm"
+      ],
+      "lien_quan": [],
+      "loai": "mon_an",
+      "so_file_full": 410,
+      "json_goc_co_1k": "15/15",
+      "can_1a_xac_nhan": false,
+      "ghi_chu": "slug 'com' là CỐM, không phải cơm (xác nhận qua ảnh)"
+    },
+    {
+      "slug": "bun_dau_mam_tom",
+      "chu_de": "bun_dau_mam_tom",
+      "thuat_ngu": "bún đậu mắm tôm",
+      "dong_nghia": [
+        "bún đậu"
+      ],
+      "lien_quan": [],
+      "loai": "mon_an",
+      "so_file_full": 408,
+      "json_goc_co_1k": "10/10",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "banh_chung",
+      "chu_de": "banh_chung",
+      "thuat_ngu": "bánh chưng",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "mon_an",
+      "so_file_full": 407,
+      "json_goc_co_1k": "14/15",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "landmark_81",
+      "chu_de": "landmark_81",
+      "thuat_ngu": "Landmark 81",
+      "dong_nghia": [
+        "Vincom Landmark 81"
+      ],
+      "lien_quan": [],
+      "loai": "dia_danh",
+      "so_file_full": 405,
+      "json_goc_co_1k": "15/15",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "chua_cau",
+      "chu_de": "chua_cau",
+      "thuat_ngu": "Chùa Cầu",
+      "dong_nghia": [
+        "cầu Nhật Bản"
+      ],
+      "lien_quan": [],
+      "loai": "dia_danh",
+      "so_file_full": 399,
+      "json_goc_co_1k": "20/21",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "bun_bo_hue",
+      "chu_de": "bun_bo_hue",
+      "thuat_ngu": "bún bò Huế",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "mon_an",
+      "so_file_full": 373,
+      "json_goc_co_1k": "14/14",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "trung_tam_thanh_pho_ho_chi_min",
+      "chu_de": "trung_tam_thanh_pho_ho_chi_min",
+      "thuat_ngu": "Thành phố Hồ Chí Minh",
+      "dong_nghia": [
+        "Sài Gòn",
+        "TP.HCM"
+      ],
+      "lien_quan": [
+        "Landmark 81",
+        "Nhà thờ Đức Bà",
+        "sông Sài Gòn"
+      ],
+      "loai": "canh",
+      "so_file_full": 371,
+      "json_goc_co_1k": "0/12",
+      "can_1a_xac_nhan": true,
+      "ghi_chu": "slug bị cắt; JSON viết tiếng Anh 'Ho Chi Minh City'/'Saigon'. Không bắt buộc 'trung tâm'. Ảnh là một công trình cụ thể thì chủ thể chính là công trình, kèm tên thành phố"
+    },
+    {
+      "slug": "nha_rong",
+      "chu_de": "nha_rong",
+      "thuat_ngu": "nhà rông",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "dia_danh",
+      "so_file_full": 367,
+      "json_goc_co_1k": "10/10",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "ao_nhat_binh",
+      "chu_de": "ao_nhat_binh",
+      "thuat_ngu": "áo Nhật Bình",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "trang_phuc",
+      "so_file_full": 350,
+      "json_goc_co_1k": "11/11",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "dua_thuyen_dua_ghe",
+      "chu_de": "dua_thuyen_dua_ghe",
+      "thuat_ngu": "đua thuyền",
+      "dong_nghia": [
+        "đua ghe",
+        "lễ hội đua thuyền"
+      ],
+      "lien_quan": [
+        "thuyền đua"
+      ],
+      "loai": "su_kien",
+      "so_file_full": 345,
+      "json_goc_co_1k": "3/6",
+      "can_1a_xac_nhan": true,
+      "ghi_chu": "JSON hay chỉ viết 'racing boat'; 'thuyền đua' là chiếc thuyền, không phải tên sự kiện"
+    },
+    {
+      "slug": "ong_dieu_cay",
+      "chu_de": "ong_dieu_cay",
+      "thuat_ngu": "ống điếu cày",
+      "dong_nghia": [
+        "điếu cày"
+      ],
+      "lien_quan": [],
+      "loai": "do_vat",
+      "so_file_full": 321,
+      "json_goc_co_1k": "14/14",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "am_tich",
+      "chu_de": "am_tich",
+      "thuat_ngu": "ấm tích",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "do_vat",
+      "so_file_full": 304,
+      "json_goc_co_1k": "7/9",
+      "can_1a_xac_nhan": true,
+      "ghi_chu": "một số JSON chỉ viết 'ceramic teapot' -> chỉ bắt buộc khi 1a xác nhận là ấm tích"
+    },
+    {
+      "slug": "khan_ran",
+      "chu_de": "khan_ran",
+      "thuat_ngu": "khăn rằn",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "trang_phuc",
+      "so_file_full": 301,
+      "json_goc_co_1k": "10/10",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "hoang_thanh_thang_long",
+      "chu_de": "hoang_thanh_thang_long",
+      "thuat_ngu": "Hoàng thành Thăng Long",
+      "dong_nghia": [],
+      "lien_quan": [
+        "Đoan Môn"
+      ],
+      "loai": "dia_danh",
+      "so_file_full": 300,
+      "json_goc_co_1k": "8/9",
+      "can_1a_xac_nhan": false,
+      "ghi_chu": "có JSON chỉ viết tiếng Anh 'Thang Long Imperial Citadel'; Đoan Môn là một cổng bên trong"
+    },
+    {
+      "slug": "hau_dong",
+      "chu_de": "hau_dong",
+      "thuat_ngu": "hầu đồng",
+      "dong_nghia": [
+        "nghi lễ hầu đồng",
+        "lên đồng"
+      ],
+      "lien_quan": [
+        "thanh đồng"
+      ],
+      "loai": "su_kien",
+      "so_file_full": 297,
+      "json_goc_co_1k": "16/16",
+      "can_1a_xac_nhan": false,
+      "ghi_chu": "nhiều ảnh là chân dung thanh đồng: chủ thể được là người, nhưng tên nghi lễ phải có"
+    },
+    {
+      "slug": "non_la",
+      "chu_de": "non_la",
+      "thuat_ngu": "nón lá",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "trang_phuc",
+      "so_file_full": 294,
+      "json_goc_co_1k": "15/15",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "quat_canh",
+      "chu_de": "quat_canh",
+      "thuat_ngu": "cây quất cảnh",
+      "dong_nghia": [
+        "cây quất",
+        "quất cảnh"
+      ],
+      "lien_quan": [],
+      "loai": "thuc_vat",
+      "so_file_full": 290,
+      "json_goc_co_1k": "5/5",
+      "can_1a_xac_nhan": false,
+      "ghi_chu": "slug là QUẤT CẢNH (cây quất), không phải quạt (xác nhận qua ảnh)"
+    },
+    {
+      "slug": "ao_ngu_than",
+      "chu_de": "ao_ngu_than",
+      "thuat_ngu": "áo ngũ thân",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "trang_phuc",
+      "so_file_full": 283,
+      "json_goc_co_1k": "11/11",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "trang_ky",
+      "chu_de": "trang_ky",
+      "thuat_ngu": "tràng kỷ",
+      "dong_nghia": [
+        "trường kỷ",
+        "bộ tràng kỷ"
+      ],
+      "lien_quan": [],
+      "loai": "do_vat",
+      "so_file_full": 275,
+      "json_goc_co_1k": "11/11",
+      "can_1a_xac_nhan": false,
+      "ghi_chu": "bộ bàn ghế gỗ truyền thống"
+    },
+    {
+      "slug": "choi_trau",
+      "chu_de": "choi_trau",
+      "thuat_ngu": "chọi trâu",
+      "dong_nghia": [
+        "trận chọi trâu",
+        "lễ hội chọi trâu"
+      ],
+      "lien_quan": [],
+      "loai": "su_kien",
+      "so_file_full": 274,
+      "json_goc_co_1k": "17/17",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "tranh_dong_ho",
+      "chu_de": "tranh_dong_ho",
+      "thuat_ngu": "tranh Đông Hồ",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "nghe_thuat",
+      "so_file_full": 274,
+      "json_goc_co_1k": "6/7",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "ao_dai_nam",
+      "chu_de": "ao_dai_nam",
+      "thuat_ngu": "áo dài nam",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "trang_phuc",
+      "so_file_full": 272,
+      "json_goc_co_1k": "13/13",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "lang_gom_bat_trang_nghe_nhan",
+      "chu_de": "lang_gom_bat_trang_nghe_nhan",
+      "thuat_ngu": "làm gốm",
+      "dong_nghia": [
+        "thợ gốm",
+        "nghệ nhân gốm",
+        "xưởng gốm"
+      ],
+      "lien_quan": [
+        "Bát Tràng",
+        "làng gốm Bát Tràng"
+      ],
+      "loai": "su_kien",
+      "so_file_full": 272,
+      "json_goc_co_1k": "2/4",
+      "can_1a_xac_nhan": true,
+      "ghi_chu": "JSON hay viết 'pottery'; 'Bát Tràng' 0/4 ở tập 1k -> không bắt buộc"
+    },
+    {
+      "slug": "trong_dong_dong_son",
+      "chu_de": "trong_dong_dong_son",
+      "thuat_ngu": "trống đồng Đông Sơn",
+      "dong_nghia": [
+        "trống đồng"
+      ],
+      "lien_quan": [],
+      "loai": "bieu_tuong",
+      "so_file_full": 270,
+      "json_goc_co_1k": "12/12",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "ruoc_kieu",
+      "chu_de": "ruoc_kieu",
+      "thuat_ngu": "rước kiệu",
+      "dong_nghia": [
+        "lễ rước kiệu"
+      ],
+      "lien_quan": [],
+      "loai": "su_kien",
+      "so_file_full": 269,
+      "json_goc_co_1k": "7/7",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "cot_co_lung_cu",
+      "chu_de": "cot_co_lung_cu",
+      "thuat_ngu": "Cột cờ Lũng Cú",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "dia_danh",
+      "so_file_full": 259,
+      "json_goc_co_1k": "5/5",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "ca_muoi",
+      "chu_de": "ca_muoi",
+      "thuat_ngu": "cà muối",
+      "dong_nghia": [
+        "cà pháo muối"
+      ],
+      "lien_quan": [],
+      "loai": "mon_an",
+      "so_file_full": 257,
+      "json_goc_co_1k": "8/8",
+      "can_1a_xac_nhan": false,
+      "ghi_chu": "CÀ muối, không phải cá muối (xác nhận qua ảnh)"
+    },
+    {
+      "slug": "le_hoi_cong_chieng",
+      "chu_de": "le_hoi_cong_chieng",
+      "thuat_ngu": "lễ hội cồng chiêng",
+      "dong_nghia": [
+        "cồng chiêng"
+      ],
+      "lien_quan": [],
+      "loai": "su_kien",
+      "so_file_full": 257,
+      "json_goc_co_1k": "2/3",
+      "can_1a_xac_nhan": true
+    },
+    {
+      "slug": "dau_vat",
+      "chu_de": "dau_vat",
+      "thuat_ngu": "đấu vật",
+      "dong_nghia": [
+        "hội vật",
+        "vật dân gian"
+      ],
+      "lien_quan": [],
+      "loai": "su_kien",
+      "so_file_full": 256,
+      "json_goc_co_1k": "14/14",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "chieu_coi",
+      "chu_de": "chieu_coi",
+      "thuat_ngu": "chiếu cói",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "do_vat",
+      "so_file_full": 248,
+      "json_goc_co_1k": "13/15",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "dan_tranh",
+      "chu_de": "dan_tranh",
+      "thuat_ngu": "đàn tranh",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "nhac_cu",
+      "so_file_full": 247,
+      "json_goc_co_1k": "12/12",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "dan_nguyet",
+      "chu_de": "dan_nguyet",
+      "thuat_ngu": "đàn nguyệt",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "nhac_cu",
+      "so_file_full": 246,
+      "json_goc_co_1k": "10/10",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "cay_dao_bich_nhat_tan",
+      "chu_de": "hoa_dao",
+      "thuat_ngu": "hoa đào",
+      "dong_nghia": [
+        "cành đào",
+        "cây đào"
+      ],
+      "lien_quan": [
+        "đào Nhật Tân",
+        "đào bích"
+      ],
+      "loai": "thuc_vat",
+      "so_file_full": 243,
+      "json_goc_co_1k": "5/7",
+      "can_1a_xac_nhan": true,
+      "ghi_chu": "thực chất là hoa đào; 'đào bích'/'Nhật Tân' 0/7 ở tập 1k -> gộp vào chủ đề hoa_dao"
+    },
+    {
+      "slug": "lan_viet_nam",
+      "chu_de": "lan_viet_nam",
+      "thuat_ngu": "múa lân",
+      "dong_nghia": [
+        "lân"
+      ],
+      "lien_quan": [
+        "đầu lân"
+      ],
+      "loai": "su_kien",
+      "so_file_full": 238,
+      "json_goc_co_1k": "8/9",
+      "can_1a_xac_nhan": false,
+      "ghi_chu": "LÂN (múa lân), không phải hoa lan (xác nhận qua ảnh)"
+    },
+    {
+      "slug": "dan_bau",
+      "chu_de": "dan_bau",
+      "thuat_ngu": "đàn bầu",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "nhac_cu",
+      "so_file_full": 237,
+      "json_goc_co_1k": "9/9",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "nieu_dat",
+      "chu_de": "nieu_dat",
+      "thuat_ngu": "niêu đất",
+      "dong_nghia": [],
+      "lien_quan": [
+        "cơm niêu"
+      ],
+      "loai": "do_vat",
+      "so_file_full": 233,
+      "json_goc_co_1k": "9/9",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "to_he",
+      "chu_de": "to_he",
+      "thuat_ngu": "tò he",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "do_vat",
+      "so_file_full": 233,
+      "json_goc_co_1k": "6/6",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "khan_xep_ao_ngu_than_nam",
+      "chu_de": "khan_xep_ao_ngu_than_nam",
+      "thuat_ngu": "khăn xếp",
+      "dong_nghia": [],
+      "lien_quan": [
+        "áo ngũ thân",
+        "áo dài nam"
+      ],
+      "loai": "trang_phuc",
+      "so_file_full": 232,
+      "json_goc_co_1k": "9/9",
+      "can_1a_xac_nhan": false,
+      "ghi_chu": "chỉ bắt buộc khăn xếp; JSON lẫn lộn 'áo ngũ thân' (2/9) và 'áo dài nam' (4/9)"
+    },
+    {
+      "slug": "guoc_moc",
+      "chu_de": "guoc_moc",
+      "thuat_ngu": "guốc mộc",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "trang_phuc",
+      "so_file_full": 219,
+      "json_goc_co_1k": "11/11",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "thuyen_thung",
+      "chu_de": "thuyen_thung",
+      "thuat_ngu": "thuyền thúng",
+      "dong_nghia": [
+        "thúng chai"
+      ],
+      "lien_quan": [],
+      "loai": "do_vat",
+      "so_file_full": 210,
+      "json_goc_co_1k": "12/12",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "con_nghe",
+      "chu_de": "con_nghe",
+      "thuat_ngu": "con nghê",
+      "dong_nghia": [
+        "nghê"
+      ],
+      "lien_quan": [],
+      "loai": "bieu_tuong",
+      "so_file_full": 194,
+      "json_goc_co_1k": "5/5",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "ao_yem_truyen_thong",
+      "chu_de": "ao_yem",
+      "thuat_ngu": "áo yếm",
+      "dong_nghia": [
+        "yếm"
+      ],
+      "lien_quan": [],
+      "loai": "trang_phuc",
+      "so_file_full": 189,
+      "json_goc_co_1k": "5/6",
+      "can_1a_xac_nhan": false,
+      "ghi_chu": "tên file thừa 'truyen thong'"
+    },
+    {
+      "slug": "ao_tu_than",
+      "chu_de": "ao_tu_than",
+      "thuat_ngu": "áo tứ thân",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "trang_phuc",
+      "so_file_full": 181,
+      "json_goc_co_1k": "9/10",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "man_doi_dau_ao_dai_nu",
+      "chu_de": "man_doi_dau_ao_dai_nu",
+      "thuat_ngu": "mấn đội đầu",
+      "dong_nghia": [
+        "mấn"
+      ],
+      "lien_quan": [
+        "áo dài"
+      ],
+      "loai": "trang_phuc",
+      "so_file_full": 181,
+      "json_goc_co_1k": "3/4",
+      "can_1a_xac_nhan": true,
+      "ghi_chu": "chủ đề là mấn đội đầu; áo dài chỉ là trang phục đi kèm"
+    },
+    {
+      "slug": "khan_mo_qua_bac_bo",
+      "chu_de": "khan_mo_qua_bac_bo",
+      "thuat_ngu": "khăn mỏ quạ",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "trang_phuc",
+      "so_file_full": 180,
+      "json_goc_co_1k": "3/3",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "xe_xich_lo",
+      "chu_de": "xe_xich_lo",
+      "thuat_ngu": "xích lô",
+      "dong_nghia": [
+        "xe xích lô"
+      ],
+      "lien_quan": [],
+      "loai": "do_vat",
+      "so_file_full": 172,
+      "json_goc_co_1k": "1/1",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "ao_giao_linh",
+      "chu_de": "ao_giao_linh",
+      "thuat_ngu": "áo giao lĩnh",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "trang_phuc",
+      "so_file_full": 162,
+      "json_goc_co_1k": "5/5",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "non_quai_thao",
+      "chu_de": "non_quai_thao",
+      "thuat_ngu": "nón quai thao",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "trang_phuc",
+      "so_file_full": 162,
+      "json_goc_co_1k": "5/5",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "hoa_dao",
+      "chu_de": "hoa_dao",
+      "thuat_ngu": "hoa đào",
+      "dong_nghia": [
+        "cành đào",
+        "cây đào"
+      ],
+      "lien_quan": [],
+      "loai": "thuc_vat",
+      "so_file_full": 157,
+      "json_goc_co_1k": "7/8",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "coi_trau_cau",
+      "chu_de": "coi_trau_cau",
+      "thuat_ngu": "trầu cau",
+      "dong_nghia": [
+        "cơi trầu cau",
+        "cơi trầu",
+        "tráp trầu cau"
+      ],
+      "lien_quan": [],
+      "loai": "do_vat",
+      "so_file_full": 154,
+      "json_goc_co_1k": "3/7",
+      "can_1a_xac_nhan": true,
+      "ghi_chu": "gồm cả cơi trầu và tráp trầu cau cưới hỏi; JSON hay viết 'betel'"
+    },
+    {
+      "slug": "don_ganh_tre",
+      "chu_de": "don_ganh_tre",
+      "thuat_ngu": "đòn gánh tre",
+      "dong_nghia": [
+        "đòn gánh"
+      ],
+      "lien_quan": [
+        "quang gánh"
+      ],
+      "loai": "do_vat",
+      "so_file_full": 136,
+      "json_goc_co_1k": "3/4",
+      "can_1a_xac_nhan": true
+    },
+    {
+      "slug": "chim_lac",
+      "chu_de": "chim_lac",
+      "thuat_ngu": "chim Lạc",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "bieu_tuong",
+      "so_file_full": 124,
+      "json_goc_co_1k": "5/5",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "tre",
+      "chu_de": "tre",
+      "thuat_ngu": "cây tre",
+      "dong_nghia": [
+        "tre",
+        "rặng tre",
+        "lũy tre"
+      ],
+      "lien_quan": [
+        "rừng tre"
+      ],
+      "loai": "thuc_vat",
+      "so_file_full": 124,
+      "json_goc_co_1k": "1/5",
+      "can_1a_xac_nhan": true,
+      "ghi_chu": "JSON hay viết tiếng Anh 'bamboo'"
+    },
+    {
+      "slug": "thuyen_doc_moc",
+      "chu_de": "thuyen_doc_moc",
+      "thuat_ngu": "thuyền độc mộc",
+      "dong_nghia": [],
+      "lien_quan": [],
+      "loai": "do_vat",
+      "so_file_full": 97,
+      "json_goc_co_1k": "3/4",
+      "can_1a_xac_nhan": true
+    },
+    {
+      "slug": "rung_tre_tu_nhien",
+      "chu_de": "rung_tre_tu_nhien",
+      "thuat_ngu": "rừng tre",
+      "dong_nghia": [],
+      "lien_quan": [
+        "cây tre",
+        "lũy tre"
+      ],
+      "loai": "canh",
+      "so_file_full": 89,
+      "json_goc_co_1k": "0/4",
+      "can_1a_xac_nhan": true,
+      "ghi_chu": "JSON viết 'bamboo grove'; có ảnh chủ thể là người đứng trong rừng tre"
+    },
+    {
+      "slug": "dap_nieu",
+      "chu_de": "dap_nieu",
+      "thuat_ngu": "đập niêu",
+      "dong_nghia": [
+        "trò chơi đập niêu"
+      ],
+      "lien_quan": [],
+      "loai": "su_kien",
+      "so_file_full": 80,
+      "json_goc_co_1k": "4/5",
+      "can_1a_xac_nhan": false
+    },
+    {
+      "slug": "tro_choi_dap_nieu_dat",
+      "chu_de": "dap_nieu",
+      "thuat_ngu": "đập niêu",
+      "dong_nghia": [
+        "trò chơi đập niêu"
+      ],
+      "lien_quan": [
+        "niêu đất"
+      ],
+      "loai": "su_kien",
+      "so_file_full": 54,
+      "json_goc_co_1k": "1/1",
+      "can_1a_xac_nhan": false,
+      "ghi_chu": "cùng chủ đề với dap_nieu"
+    },
+    {
+      "slug": "yem",
+      "chu_de": "ao_yem",
+      "thuat_ngu": "áo yếm",
+      "dong_nghia": [
+        "yếm"
+      ],
+      "lien_quan": [],
+      "loai": "trang_phuc",
+      "so_file_full": 29,
+      "json_goc_co_1k": "2/2",
+      "can_1a_xac_nhan": true,
+      "ghi_chu": "có ảnh không thể hiện yếm (vd người gánh hoa sen) -> 1a phải xác nhận ảnh có yếm"
+    }
+  ]
+}

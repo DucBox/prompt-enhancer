@@ -9,13 +9,19 @@ Luồng:
     --assemble_subjson--> sub_json của từng mức (checklist ghép thẳng từ lựa chọn)
 
 Code KHÔNG quyết định giữ/bỏ nội dung nào -- đó là việc của LLM theo định nghĩa mức.
-Code chỉ kiểm tra LLM tuân thủ: chép nguyên văn, lồng nhau, chủ thể bắt buộc, trần từ.
+Code chỉ kiểm tra LLM tuân thủ: chép nguyên văn, lồng nhau, trần từ.
+
+Chủ đề chính (`chu_de_chinh`) do 1a rút từ high_level_description, có tham khảo gợi ý từ
+tên thư mục. Code TỰ chèn nó vào cả ba mức -- LLM của 1b không chọn nên không làm mất được.
 """
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from common import schema
@@ -35,29 +41,48 @@ STYLE_FIELDS = ("photo", "art_style", "lighting", "aesthetics")
 _DUP_SUFFIX = re.compile(r" \[\d+\]$")
 
 
-# Tên file trong bộ dữ liệu là slug không dấu của CHỦ THỂ CHÍNH thật sự (vd
-# "hu_tieu_nam_vang_001001"). Đây là tín hiệu độc lập với việc 1a xếp nhóm nào đứng đầu.
+TOPIC_TERMS_FILE = Path(__file__).resolve().parent / "topic_terms.json"
+
+
+# Tên file trong bộ dữ liệu là slug không dấu của thư mục chủ đề (vd "hu_tieu_nam_vang_001001").
+# Chỉ là GỢI Ý: slug hay thừa chữ ("banh_mi_viet_nam"), bị cắt ("..._ho_chi_min"), hoặc chỉ là
+# từ khoá tìm kiếm mà ảnh không thể hiện. Chủ đề thật do 1a đọc từ high_level_description.
 def strip_vn_diacritics(s: str) -> str:
     s = s.replace("đ", "d").replace("Đ", "D")
     nfd = unicodedata.normalize("NFD", s)
     return "".join(c for c in nfd if unicodedata.category(c) != "Mn")
 
 
+def topic_slug(row_id: str) -> str:
+    return re.sub(r"_\d+$", "", row_id)
+
+
 def filename_keyword_words(row_id: str) -> List[str]:
     """"ruoc_kieu_002128" -> ["ruoc", "kieu"] -- bỏ hậu tố số thứ tự cuối cùng."""
-    slug = re.sub(r"_\d+$", "", row_id)
-    return [w for w in slug.split("_") if w]
+    return [w for w in topic_slug(row_id).split("_") if w]
 
 
-def find_required_group_index(groups: List[Dict[str, Any]], row_id: str) -> Optional[int]:
-    keywords = filename_keyword_words(row_id)
-    if not keywords:
-        return None
-    for i, group in enumerate(groups):
-        name_ascii = strip_vn_diacritics(str(group.get("name", ""))).lower()
-        if all(kw in name_ascii for kw in keywords):
-            return i
-    return None
+@lru_cache(maxsize=None)
+def load_topic_terms(path: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+    """slug -> mục trong topic_terms.json. Không có file thì trả rỗng (gợi ý chỉ còn tên thư mục)."""
+    file = Path(path) if path else TOPIC_TERMS_FILE
+    if not file.is_file():
+        return {}
+    data = json.loads(file.read_text(encoding="utf-8"))
+    return {t["slug"]: t for t in data.get("topics", []) if t.get("slug")}
+
+
+def topic_hint(row_id: str, topics: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """Gợi ý chủ đề đưa cho 1a: tên thư mục + thuật ngữ có dấu nếu bảng chủ đề có."""
+    hint: Dict[str, Any] = {"ten_thu_muc": " ".join(filename_keyword_words(row_id))}
+    topic = topics.get(topic_slug(row_id))
+    if topic:
+        hint["thuat_ngu"] = topic["thuat_ngu"]
+        # Không đưa "lien_quan" (Bát Tràng, Nhật Tân...): chỉ đúng với một phần ảnh, dễ bị 1a
+        # chèn vào chủ đề khi mô tả gốc không nhắc tới.
+        if topic.get("dong_nghia"):
+            hint["dong_nghia"] = list(topic["dong_nghia"])
+    return hint
 
 
 def _cardinality_n(cardinality: Any) -> Optional[int]:
@@ -100,7 +125,6 @@ def _dedupe(items: List[str]) -> List[str]:
 def build_selection_input(
     target: Dict[str, Any],
     decomposition: Dict[str, Any],
-    required_group_index: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Sắp xếp lại decomposition theo nhóm cho LLM đọc. Không bỏ bớt thông tin nào."""
     facts_map = decomposition.get("facts") or {}
@@ -143,15 +167,11 @@ def build_selection_input(
         entry["elements"] = group["elements"]
         groups.append(entry)
 
-    required = None
-    if required_group_index is not None and 0 <= required_group_index < len(groups):
-        required = groups[required_group_index]["name"]
-
     style_facts = decomposition.get("style_facts") or {}
     return {
         "high_level_description": str(target.get("high_level_description", "")),
+        "chu_de_chinh": _texts(decomposition.get("chu_de_chinh")),
         "medium": str((target.get("style_description") or {}).get("medium", "")),
-        "required_subject": required,
         "groups": groups,
         "background": _texts(decomposition.get("background_facts")),
         "style": {k: _texts(style_facts.get(k)) for k in STYLE_FIELDS if _texts(style_facts.get(k))},
@@ -168,7 +188,8 @@ def _parse_level(
     by_name = {g["name"]: g for g in sel_input["groups"]}
 
     raw_groups = raw.get("groups")
-    if not isinstance(raw_groups, list) or not raw_groups:
+    # Có chủ đề chính thì mức đó đã có nội dung -- được phép không chọn thêm nhóm nào.
+    if not isinstance(raw_groups, list) or (not raw_groups and not sel_input.get("chu_de_chinh")):
         errors.append("{}: 'groups' rỗng hoặc sai kiểu".format(level))
         return None
 
@@ -258,18 +279,25 @@ def _level_view(parsed: Dict[str, Any], sel_input: Dict[str, Any]) -> Dict[str, 
         })
     style = {k: parsed["style"][k] for k in STYLE_FIELDS if parsed["style"].get(k)}
     medium = sel_input.get("medium") if parsed["medium"] and sel_input.get("medium") else None
+    theme = list(sel_input.get("chu_de_chinh") or [])
 
-    checklist = [f for g in groups_out for f in g["facts"]]
+    # Chủ đề chính đứng đầu checklist; mệnh đề trùng với nó (vd tên nhóm văn hoá) chỉ tính một lần.
+    checklist = list(theme) + [f for g in groups_out for f in g["facts"]]
     checklist += parsed["background"]
     checklist += [f for k in STYLE_FIELDS for f in style.get(k, [])]
     if medium:
         checklist.append(medium)
-    return {"groups": groups_out, "background": list(parsed["background"]),
-            "style": style, "medium": medium, "checklist": checklist}
+    return {"chu_de_chinh": theme, "groups": groups_out, "background": list(parsed["background"]),
+            "style": style, "medium": medium, "checklist": _dedupe(checklist)}
 
 
 def checklist_words(checklist: List[str]) -> int:
     return sum(len(item.split()) for item in checklist)
+
+
+def chosen_words(view: Dict[str, Any]) -> int:
+    """Số từ LLM 1b tự chọn -- không tính chủ đề chính, vì LLM không bỏ được nó."""
+    return checklist_words(view["checklist"]) - checklist_words(view["chu_de_chinh"])
 
 
 def short_idea_count(parsed: Dict[str, Any], sel_input: Dict[str, Any]) -> int:
@@ -325,15 +353,12 @@ def evaluate_selection(selection: Any, sel_input: Dict[str, Any]) -> Dict[str, A
     parsed = {level: _parse_level(level, selection.get(level), sel_input, level_errors[level])
               for level in LEVELS}
 
-    required = sel_input.get("required_subject")
     for level, p in parsed.items():
         if p is None:
             continue
-        if required and all(g["name"] != required for g in p["groups"]):
-            level_errors[level].append("{}: thiếu nhóm chủ thể bắt buộc {!r}".format(level, required))
         cap = ACCEPT_CHECKLIST_WORDS[level]
         if cap is not None:
-            words = checklist_words(_level_view(p, sel_input)["checklist"])
+            words = chosen_words(_level_view(p, sel_input))
             if words > cap:
                 level_errors[level].append("{}: tổng {} từ, vượt trần {} từ".format(
                     level, words, MAX_CHECKLIST_WORDS[level]))
@@ -386,22 +411,16 @@ def assemble_subjson(
         raise ValueError("lựa chọn không có mức {}: {}".format(level, errors))
     view = _level_view(parsed, sel_input)
 
-    required_subject = None
-    required = sel_input.get("required_subject")
-    if required:
-        for picked, group in zip(parsed["groups"], view["groups"]):
-            if picked["name"] == required and group["facts"]:
-                required_subject = group["facts"][0]
-                break
-
     return {
         "id": row_id,
         "detail_level": level,
         "length_hint": LENGTH_HINT[level],
+        "chu_de_chinh": view["chu_de_chinh"],
         "groups": view["groups"],
         "background": view["background"],
         "style": view["style"],
         "medium": view["medium"],
         "checklist": view["checklist"],
-        "required_subject": required_subject,
+        # 2b loại ngay nếu judge báo thiếu bất kỳ mệnh đề nào ở đây, bất kể --max_missing.
+        "required_facts": list(view["chu_de_chinh"]),
     }

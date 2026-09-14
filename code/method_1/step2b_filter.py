@@ -25,6 +25,7 @@ Ví dụ:
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -64,26 +65,38 @@ def make_client() -> llm.LLMClient:
     )
 
 
+def required_facts_of(row: Dict[str, Any]) -> List[str]:
+    """Mệnh đề chủ đề chính bắt buộc của một dòng; đọc được cả dòng cũ chỉ có required_subject."""
+    if row.get("required_facts"):
+        return list(row["required_facts"])
+    return [row["required_subject"]] if row.get("required_subject") else []
+
+
+def reason_label(reason: str) -> str:
+    """Nhãn gom thống kê: "thiếu 3 mệnh đề" -> "thiếu mệnh đề", bỏ phần chi tiết sau dấu ':'."""
+    return re.sub(r"\s*\d+\s+", " ", reason.split(":")[0]).strip()
+
+
 def decide(verdict: Dict[str, Any], args: argparse.Namespace,
-          required_subject: Optional[str] = None) -> Dict[str, Any]:
+          required_facts: Optional[List[str]] = None) -> Dict[str, Any]:
     """Quyết định đạt/loại từ đầu ra của judge, theo ngưỡng do CLI đặt.
 
     Chỉ xét THIẾU/THÊM so với checklist. Văn phong (dịch máy, liệt kê máy móc...)
     không phải tiêu chí loại bỏ ở đây — đó là việc của bước 2a.
 
-    `required_subject` (rút từ TÊN FILE, xem common/subjson.find_required_group_index)
-    là chủ thể chính BẮT BUỘC tuyệt đối -- thiếu nó thì loại NGAY, không phụ thuộc
-    --max_missing. Không có ràng buộc riêng này thì việc nới --max_missing > 0 để
-    giảm tỉ lệ loại có thể vô tình cho lọt đúng trường hợp nguy hiểm nhất: prompt
-    thiếu hẳn chủ thể chính (vd "hủ tiếu Nam Vang") nhưng vẫn đạt vì các mệnh đề
-    thiếu khác được xem ngang hàng và nằm trong ngưỡng cho phép.
+    `required_facts` là các mệnh đề CHỦ ĐỀ CHÍNH (1a rút từ high_level_description) --
+    thiếu bất kỳ mệnh đề nào thì loại NGAY, không phụ thuộc --max_missing. Không có ràng
+    buộc riêng này thì việc nới --max_missing > 0 để giảm tỉ lệ loại có thể cho lọt đúng
+    trường hợp nguy hiểm nhất: prompt lệch chủ đề (vd ảnh làm gốm mà prompt chỉ nói "hai
+    phụ nữ và một người đàn ông") nhưng vẫn đạt vì các mệnh đề thiếu nằm trong ngưỡng.
     """
     missing = verdict.get("missing") or []
     extra = verdict.get("extra") or []
 
     reasons: List[str] = []
-    if required_subject and required_subject in missing:
-        reasons.append("thiếu chủ thể chính bắt buộc: '{}'".format(required_subject))
+    lost_theme = [f for f in required_facts or [] if f in missing]
+    if lost_theme:
+        reasons.append("thiếu chủ đề chính: {}".format(lost_theme))
     elif len(missing) > args.max_missing:
         reasons.append("thiếu {} mệnh đề".format(len(missing)))
     if extra:
@@ -166,13 +179,13 @@ def main() -> None:
         path = cache_dir / "{}.json".format(key_of(row))
         if not path.is_file():
             continue
-        result = decide(io_utils.read_json(path), args, row.get("required_subject"))
+        result = decide(io_utils.read_json(path), args, required_facts_of(row))
         if result["passed"]:
             passed.append(row)
         else:
             rejected.append({**row, "reject": result})
             for reason in result["reasons"]:
-                label = reason.split(" ")[0] + " " + reason.split(" ")[-1]
+                label = reason_label(reason)
                 reason_counts[label] = reason_counts.get(label, 0) + 1
 
     n_judged = len(passed) + len(rejected)

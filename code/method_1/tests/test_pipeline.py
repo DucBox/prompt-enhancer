@@ -52,6 +52,9 @@ SAMPLE_TARGET = {
 }
 
 SAMPLE_DECOMP = {
+    "chu_de_chinh": [{"rank": 0, "text": "nhóm bạn chụp ảnh"},
+                     {"rank": 1, "text": "trước Lăng Bác"}],
+    "khop_goi_y": True,
     "concept_groups": [
         {"name": "nhóm bạn", "member_ids": [0, 1, 2], "cardinality": "exact:3", "cultural": False},
         {"name": "Lăng Bác", "member_ids": [3], "cardinality": "exact:1", "cultural": True},
@@ -304,6 +307,60 @@ class TestDecomposeValidation(unittest.TestCase):
         self.assertNotIn("kind", out["style_facts"]["lighting"][0])
         self.assertNotIn("medium", out["style_facts"])
 
+    def test_rejects_missing_theme(self):
+        bad = json.loads(json.dumps(SAMPLE_DECOMP))
+        del bad["chu_de_chinh"]
+        errors = s1a.validate_decomposition(bad, SAMPLE_TARGET)
+        self.assertTrue(any("chu_de_chinh" in e for e in errors))
+
+    def test_rejects_theme_that_lists_details(self):
+        bad = json.loads(json.dumps(SAMPLE_DECOMP))
+        bad["chu_de_chinh"] = [{"rank": i, "text": "ý {}".format(i)} for i in range(4)]
+        errors = s1a.validate_decomposition(bad, SAMPLE_TARGET)
+        self.assertTrue(any("chu_de_chinh có 4 mệnh đề" in e for e in errors))
+
+    def test_rejects_theme_over_word_cap(self):
+        bad = json.loads(json.dumps(SAMPLE_DECOMP))
+        bad["chu_de_chinh"] = [{"rank": 0, "text": "nhóm bạn trẻ đứng tạo dáng chụp ảnh kỷ niệm"},
+                               {"rank": 1, "text": "trước Lăng Bác"}]
+        errors = s1a.validate_decomposition(bad, SAMPLE_TARGET)
+        self.assertTrue(any("chu_de_chinh có tổng 13 từ" in e for e in errors))
+
+    def test_topic_hint_leaves_out_related_context(self):
+        topics = {"lang_gom_bat_trang_nghe_nhan": {
+            "slug": "lang_gom_bat_trang_nghe_nhan", "thuat_ngu": "làm gốm",
+            "dong_nghia": ["thợ gốm"], "lien_quan": ["Bát Tràng"]}}
+        hint = subjson.topic_hint("lang_gom_bat_trang_nghe_nhan_000001", topics)
+        self.assertNotIn("lien_quan", hint)
+        self.assertEqual(hint["dong_nghia"], ["thợ gốm"])
+
+    def test_judge_prompt_requires_verbatim_missing(self):
+        self.assertIn("CHÉP NGUYÊN VĂN", prompts.STEP2B_SYSTEM)
+
+    def test_normalize_keeps_theme_ranked_and_match_flag(self):
+        messy = {"chu_de_chinh": [{"rank": 3, "text": "quanh bàn xoay gốm"},
+                                  {"rank": 0, "text": "nhóm người làm gốm"}],
+                 "khop_goi_y": 1, "concept_groups": [], "facts": {}}
+        out = s1a.normalize_decomposition(messy)
+        self.assertEqual([f["text"] for f in out["chu_de_chinh"]],
+                         ["nhóm người làm gốm", "quanh bàn xoay gốm"])
+        self.assertIs(out["khop_goi_y"], True)
+        self.assertNotIn("kind", out["chu_de_chinh"][0])
+
+    def test_cache_is_stale_when_topic_hint_changes(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "x.json"
+            hint = {"ten_thu_muc": "am tich", "thuat_ngu": "ấm tích"}
+            io_utils.write_json(path, {**s1a.normalize_decomposition(SAMPLE_DECOMP), "goi_y_chu_de": hint})
+            self.assertTrue(s1a.is_cache_current(path, hint))
+            self.assertFalse(s1a.is_cache_current(path, {"ten_thu_muc": "am tich"}))
+
+    def test_system_prompt_treats_filename_as_hint_and_follows_hld(self):
+        text = prompts.STEP1A_SYSTEM
+        for phrase in ("chu_de_chinh", "khop_goi_y", "CHỈ ĐỂ THAM KHẢO", "high_level_description",
+                       "nhóm người làm gốm"):
+            self.assertIn(phrase, text)
+
     def test_normalize_sets_every_field_priority_to_one(self):
         out = s1a.normalize_decomposition(SAMPLE_DECOMP)
         self.assertEqual(out["field_priority"], {
@@ -367,9 +424,7 @@ class TestSubJsonSelection(unittest.TestCase):
     """STEP 1b: LLM chọn, code chỉ dựng đầu vào, KIỂM TRA lựa chọn và lắp sub_json."""
 
     def sel_input(self, row_id="img1", decomp=None):
-        decomp = decomp or SAMPLE_DECOMP
-        index = subjson.find_required_group_index(decomp["concept_groups"], row_id)
-        return subjson.build_selection_input(SAMPLE_TARGET, decomp, index)
+        return subjson.build_selection_input(SAMPLE_TARGET, decomp or SAMPLE_DECOMP)
 
     def errors(self, selection, row_id="img1"):
         return subjson.validate_selection(selection, self.sel_input(row_id))
@@ -407,9 +462,26 @@ class TestSubJsonSelection(unittest.TestCase):
         self.assertIn("nhóm bạn [2]", names)
         self.assertEqual(subjson.original_name("nhóm bạn [2]"), "nhóm bạn")
 
-    def test_required_subject_from_filename(self):
-        self.assertEqual(self.sel_input("lang_bac_000123")["required_subject"], "Lăng Bác")
-        self.assertIsNone(self.sel_input("img1")["required_subject"])
+    def test_input_carries_theme_from_decomposition_not_filename(self):
+        inp = self.sel_input("lang_bac_000123")
+        self.assertEqual(inp["chu_de_chinh"], ["nhóm bạn chụp ảnh", "trước Lăng Bác"])
+        self.assertNotIn("required_subject", inp)
+
+    def test_topic_hint_uses_topic_table_when_slug_known(self):
+        topics = {"trung_tam_thanh_pho_ho_chi_min": {
+            "slug": "trung_tam_thanh_pho_ho_chi_min", "thuat_ngu": "Thành phố Hồ Chí Minh",
+            "dong_nghia": ["Sài Gòn"], "lien_quan": [], "so_file_full": 371}}
+        hint = subjson.topic_hint("trung_tam_thanh_pho_ho_chi_min_001534", topics)
+        self.assertEqual(hint, {"ten_thu_muc": "trung tam thanh pho ho chi min",
+                                "thuat_ngu": "Thành phố Hồ Chí Minh", "dong_nghia": ["Sài Gòn"]})
+
+    def test_topic_hint_falls_back_to_folder_name(self):
+        self.assertEqual(subjson.topic_hint("con_trau_000001", {}), {"ten_thu_muc": "con trau"})
+
+    def test_shipped_topic_table_loads(self):
+        topics = subjson.load_topic_terms()
+        self.assertIn("lang_gom_bat_trang_nghe_nhan", topics)
+        self.assertTrue(all(t.get("thuat_ngu") for t in topics.values()))
 
     # --- kiểm tra lựa chọn ----------------------------------------------------
 
@@ -466,11 +538,27 @@ class TestSubJsonSelection(unittest.TestCase):
             self.assertGreater(subjson.ACCEPT_CHECKLIST_WORDS[level], subjson.MAX_CHECKLIST_WORDS[level])
         self.assertEqual(subjson.ACCEPT_CHECKLIST_WORDS, {"short": 20, "medium": 55, "long": None})
 
-    def test_rejects_missing_required_subject(self):
+    def test_short_may_pick_no_group_when_theme_exists(self):
+        good = _copy(GOOD_SELECTION)
+        good["short"]["groups"] = []
+        self.assertEqual(self.errors(good), [])
+        self.assertEqual(self.assemble("short", selection=good)["checklist"],
+                         ["nhóm bạn chụp ảnh", "trước Lăng Bác"])
+
+    def test_groups_still_required_without_theme(self):
+        decomp = _copy(SAMPLE_DECOMP)
+        del decomp["chu_de_chinh"]
         bad = _copy(GOOD_SELECTION)
-        bad["short"]["groups"] = [bad["short"]["groups"][0]]
-        errors = self.errors(bad, row_id="lang_bac_000123")
-        self.assertTrue(any("short: thiếu nhóm chủ thể bắt buộc" in e for e in errors))
+        bad["short"]["groups"] = []
+        errors = subjson.validate_selection(bad, self.sel_input(decomp=decomp))
+        self.assertTrue(any("short: 'groups' rỗng" in e for e in errors))
+
+    def test_theme_words_do_not_count_toward_word_cap(self):
+        # short tự chọn đúng 10 từ; chủ đề chính thêm 5 từ nữa mà vẫn hợp lệ ở trần 10.
+        with mock.patch.dict(subjson.ACCEPT_CHECKLIST_WORDS, {"short": 10}):
+            self.assertEqual(self.errors(GOOD_SELECTION), [])
+        with mock.patch.dict(subjson.ACCEPT_CHECKLIST_WORDS, {"short": 9}):
+            self.assertTrue(any("short: tổng 10 từ" in e for e in self.errors(GOOD_SELECTION)))
 
     def test_rejects_label_group_without_facts(self):
         bad = _copy(GOOD_SELECTION)
@@ -576,9 +664,10 @@ class TestSubJsonSelection(unittest.TestCase):
         for level in subjson.LEVELS:
             sub = self.assemble(level)
             spec = s2a.build_spec(sub, persona)
-            given = [f for g in spec["groups"] for f in g["facts"]]
+            given = list(spec.get("chu_de_chinh", []))
+            given += [f for g in spec["groups"] for f in g["facts"]]
             given += spec.get("boi_canh", []) + spec.get("phong_cach", [])
-            self.assertEqual(given, sub["checklist"], level)
+            self.assertEqual(subjson._dedupe(given), sub["checklist"], level)
 
     def test_cultural_name_is_checklist_item_but_label_is_not(self):
         checklist = self.assemble("long")["checklist"]
@@ -596,10 +685,20 @@ class TestSubJsonSelection(unittest.TestCase):
         groups = {g["name"]: g for g in self.assemble("short", selection=no_count)["groups"]}
         self.assertTrue(groups["nhóm bạn"]["so_nhieu"])
 
-    def test_required_subject_points_to_checklist_item(self):
-        sub = self.assemble("short", row_id="lang_bac_000123")
-        self.assertEqual(sub["required_subject"], "Lăng Bác")
-        self.assertIn(sub["required_subject"], sub["checklist"])
+    def test_theme_leads_checklist_and_is_required_at_every_level(self):
+        for level in subjson.LEVELS:
+            sub = self.assemble(level)
+            self.assertEqual(sub["chu_de_chinh"], ["nhóm bạn chụp ảnh", "trước Lăng Bác"])
+            self.assertEqual(sub["checklist"][:2], sub["chu_de_chinh"], level)
+            self.assertEqual(sub["required_facts"], sub["chu_de_chinh"], level)
+            self.assertNotIn("required_subject", sub)
+
+    def test_fact_equal_to_theme_appears_once_in_checklist(self):
+        decomp = _copy(SAMPLE_DECOMP)
+        decomp["chu_de_chinh"] = [{"rank": 0, "text": "Lăng Bác"}]
+        sub = subjson.assemble_subjson("img1", self.sel_input(decomp=decomp), GOOD_SELECTION, "long")
+        self.assertEqual(sub["checklist"].count("Lăng Bác"), 1)
+        self.assertEqual(sub["checklist"][0], "Lăng Bác")
 
     def test_length_hint_per_level(self):
         self.assertEqual(self.assemble("short")["length_hint"], "8-20 từ")
@@ -780,7 +879,7 @@ class TestCorrection(unittest.TestCase):
     def test_recovered_row_keeps_original_prompt_for_audit(self):
         """corrected_passed phải giữ lại prompt gốc để audit -- không ghi đè mất dấu vết."""
         row = {"id": "x", "detail_level": "short", "user_prompt": "cũ",
-              "checklist": [], "required_subject": None}
+              "checklist": [], "required_facts": []}
         attempt_prompt = "mới đã sửa"
         merged = {**row, "user_prompt": attempt_prompt,
                  "n_words": len(attempt_prompt.split()), "corrected": True,
@@ -820,36 +919,48 @@ class TestFilterDecision(unittest.TestCase):
     def test_handles_absent_keys(self):
         self.assertTrue(s2b.decide({}, _Args())["passed"])
 
-    def test_required_subject_missing_fails_even_with_max_missing_tolerance(self):
-        """Chốt chặn cho ý user: chủ thể chính (rút từ tên file, vd 'hủ tiếu Nam
-        Vang') phải BẮT BUỘC tuyệt đối -- thiếu nó thì loại ngay dù --max_missing
-        đang cho phép bỏ qua các mệnh đề khác."""
+    def test_missing_theme_fact_fails_even_with_max_missing_tolerance(self):
+        """Chốt chặn: chủ đề chính (1a rút từ high_level_description) phải BẮT BUỘC tuyệt đối
+        -- thiếu bất kỳ mệnh đề nào của nó thì loại ngay dù --max_missing đang cho phép bỏ qua
+        các mệnh đề khác (ảnh làm gốm mà prompt chỉ nói về mấy người trong ảnh)."""
         class Tolerant(_Args):
             max_missing = 5
 
-        verdict = {"missing": ["hủ tiếu Nam Vang"], "extra": []}
-        out = s2b.decide(verdict, Tolerant(), required_subject="hủ tiếu Nam Vang")
+        verdict = {"missing": ["nhóm người làm gốm"], "extra": []}
+        out = s2b.decide(verdict, Tolerant(),
+                         required_facts=["nhóm người làm gốm", "quanh bàn xoay gốm"])
         self.assertFalse(out["passed"])
+        self.assertIn("thiếu chủ đề chính", out["reasons"][0])
 
-    def test_required_subject_present_does_not_block_pass(self):
+    def test_theme_present_does_not_block_pass(self):
         verdict = {"missing": [], "extra": []}
-        out = s2b.decide(verdict, _Args(), required_subject="hủ tiếu Nam Vang")
+        out = s2b.decide(verdict, _Args(), required_facts=["nhóm người làm gốm"])
         self.assertTrue(out["passed"])
 
-    def test_no_required_subject_falls_back_to_normal_tolerance(self):
+    def test_no_theme_falls_back_to_normal_tolerance(self):
         class Tolerant(_Args):
             max_missing = 1
 
         verdict = {"missing": ["màu xanh"], "extra": []}
-        out = s2b.decide(verdict, Tolerant(), required_subject=None)
+        out = s2b.decide(verdict, Tolerant(), required_facts=None)
         self.assertTrue(out["passed"])
+
+    def test_required_facts_reads_legacy_required_subject(self):
+        self.assertEqual(s2b.required_facts_of({"required_facts": ["a", "b"]}), ["a", "b"])
+        self.assertEqual(s2b.required_facts_of({"required_subject": "hủ tiếu"}), ["hủ tiếu"])
+        self.assertEqual(s2b.required_facts_of({"required_subject": None}), [])
+
+    def test_reason_label_groups_reasons_without_details(self):
+        self.assertEqual(s2b.reason_label("thiếu 3 mệnh đề"), "thiếu mệnh đề")
+        self.assertEqual(s2b.reason_label("thêm 11 thông tin"), "thêm thông tin")
+        self.assertEqual(s2b.reason_label("thiếu chủ đề chính: ['chưng']"), "thiếu chủ đề chính")
 
     def test_ignore_judge_verdict_shape_always_passes(self):
         """--ignore_judge ghi verdict rỗng {"missing": [], "extra": [], "ignored": True}
         cho MỌI dòng thay vì gọi model -- decide() phải luôn trả về đạt với verdict
-        này, kể cả khi có required_subject (không check gì cả theo đúng yêu cầu)."""
+        này, kể cả khi có chủ đề chính (không check gì cả theo đúng yêu cầu)."""
         verdict = {"missing": [], "extra": [], "ignored": True}
-        out = s2b.decide(verdict, _Args(), required_subject="hủ tiếu Nam Vang")
+        out = s2b.decide(verdict, _Args(), required_facts=["hủ tiếu Nam Vang"])
         self.assertTrue(out["passed"])
 
     def test_ignore_judge_flag_exists_and_defaults_false(self):
@@ -947,6 +1058,14 @@ class TestPrompts(unittest.TestCase):
         # Few-shot phải dạy đúng luật vague
         self.assertIn("vague", messages[2]["content"])
 
+    def test_step1a_messages_carry_topic_hint_for_fewshot_and_target(self):
+        hint = {"ten_thu_muc": "am tich", "thuat_ngu": "ấm tích"}
+        messages = prompts.build_step1a_messages(SAMPLE_TARGET, hint)
+        self.assertIn("chợ nổi Cái Răng", messages[1]["content"].split("MÔ TẢ ẢNH")[0])
+        self.assertIn('"thuat_ngu": "ấm tích"', messages[-1]["content"])
+        self.assertIn("Lăng Bác", messages[-1]["content"])
+        self.assertIn("chu_de_chinh", messages[2]["content"])
+
     def test_step1a_fewshot_output_is_valid_against_its_input(self):
         """Ví dụ few-shot phải tự vượt qua chính bộ validate của step 1a."""
         errors = s1a.validate_decomposition(
@@ -966,7 +1085,7 @@ class TestPrompts(unittest.TestCase):
     def test_step1b_system_defines_levels_by_content_not_length(self):
         text = prompts.STEP1B_SYSTEM
         for phrase in ("ĐỘ PHỦ", "ĐỘ SÂU", "LOẠI THÔNG TIN", "SHORT", "MEDIUM", "LONG",
-                       "NGUYÊN VĂN", "LỒNG NHAU", "CÓ BẢN SẮC", "required_subject"):
+                       "NGUYÊN VĂN", "LỒNG NHAU", "CÓ BẢN SẮC", "chu_de_chinh"):
             self.assertIn(phrase, text)
 
     def test_step1b_fix_message_lists_every_error(self):
@@ -998,13 +1117,19 @@ class TestPrompts(unittest.TestCase):
         self.assertIn("ĐẦY ĐỦ", text)
         self.assertIn("bỏ sót", text)
 
+    def test_step2a_system_puts_theme_first(self):
+        text = prompts.STEP2A_SYSTEM
+        self.assertIn('"chu_de_chinh" là ý chính', text)
+        self.assertIn("KHÔNG được lấn át", text)
+
     def test_step2a_fewshot_examples_fully_cover_their_own_facts(self):
         """Few-shot phải LÀM MẪU đúng luật 'nhắc đủ mọi mệnh đề' -- nếu ví dụ tự mâu thuẫn
         với luật thì model học sai theo ví dụ, bất kể system prompt viết gì."""
         stopwords = {"từ", "trên", "trong", "chụp", "và", "mặt", "là", "những", "chiếc",
                      "màu", "bằng", "đang", "một"}
         for spec, answer in prompts.STEP2A_FEWSHOT:
-            items = [f for g in spec["groups"] for f in g["facts"]]
+            items = list(spec.get("chu_de_chinh", []))
+            items += [f for g in spec["groups"] for f in g["facts"]]
             items += spec.get("boi_canh", []) + spec.get("phong_cach", [])
             answer_low = answer.lower()
             for item in items:
@@ -1015,7 +1140,8 @@ class TestPrompts(unittest.TestCase):
                         spec["detail_level"], kw, item))
 
     def test_step2a_fewshot_specs_use_build_spec_shape(self):
-        allowed = {"detail_level", "length_hint", "persona", "groups", "boi_canh", "phong_cach"}
+        allowed = {"detail_level", "length_hint", "persona", "chu_de_chinh", "groups", "boi_canh",
+                   "phong_cach"}
         for spec, _ in prompts.STEP2A_FEWSHOT:
             self.assertLessEqual(set(spec), allowed)
             for group in spec["groups"]:

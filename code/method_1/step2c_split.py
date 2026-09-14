@@ -129,6 +129,7 @@ def main() -> None:
             "persona": row.get("persona", {}),
             # sub_json: chỉ dùng để chấm điểm ở bước 5, KHÔNG phải nhãn huấn luyện
             "sub_json": {
+                "chu_de_chinh": sub.get("chu_de_chinh", []),
                 "groups": sub.get("groups", []),
                 "background": sub.get("background", []),
                 "style": sub.get("style", {}),

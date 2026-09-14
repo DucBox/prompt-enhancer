@@ -95,10 +95,16 @@ mạng — dùng để soi prompt trước khi đốt tiền.
   (element, background, photo/art_style, lighting, aesthetics) thành mệnh đề tiếng Việt đã xếp
   hạng. 1b đưa bản phân rã + định nghĩa short/medium/long (độ phủ × độ sâu × loại thông tin)
   cho LLM chọn cả 3 mức trong một lần gọi. Code chỉ KIỂM TRA: chép nguyên văn, lồng nhau
-  short ⊆ medium ⊆ long, chủ thể bắt buộc (từ tên file), trần từ (prompt ghi short 16 /
-  medium 50, code chấp nhận tới 20 / 55); sai thì gọi lại kèm danh sách lỗi
-  (`--max_fix_attempts`, mặc định 2). Checklist ghép thẳng từ các mệnh đề đã chọn, và 2a chỉ
-  nhận đúng các mệnh đề đó.
+  short ⊆ medium ⊆ long, trần từ (prompt ghi short 16 / medium 50, code chấp nhận tới 20 / 55,
+  không tính chủ đề chính); sai thì gọi lại kèm danh sách lỗi (`--max_fix_attempts`, mặc định 2).
+  Checklist = chủ đề chính + các mệnh đề đã chọn, và 2a chỉ nhận đúng các mệnh đề đó.
+- **Chủ đề chính bám high_level_description, tên file chỉ là gợi ý.** 1a đọc HLD rút ra
+  `chu_de_chinh` (1-3 mệnh đề: bức ảnh VỀ CÁI GÌ — vd "nhóm người làm gốm", không phải "hai
+  phụ nữ và một người đàn ông"). Gợi ý từ tên thư mục + `common/topic_terms.json` (thuật ngữ
+  có dấu, đồng nghĩa) chỉ để 1a chọn cách gọi tên; ảnh không thể hiện chủ đề gợi ý thì 1a bỏ
+  qua (`khop_goi_y: false`). Code tự chèn chủ đề vào cả 3 mức; 2b loại ngay nếu judge báo thiếu
+  bất kỳ mệnh đề chủ đề nào (`required_facts`), bất kể `--max_missing`. Sửa `topic_terms.json`
+  thì cache 1a của các ảnh có gợi ý thay đổi tự được gọi lại.
 - **Hỏng mức nào bỏ mức đó.** Hết lượt sửa mà vẫn lỗi thì 1b giữ các mức tự hợp lệ và lồng
   nhau với nhau (hai mức hợp lệ mà không lồng nhau thì bỏ mức ít chi tiết hơn), ghi lý do vào
   `step1b_subjson/partial.json`. Chỉ ảnh không giữ được mức nào mới vào `failures.json` (kèm
@@ -110,7 +116,7 @@ mạng — dùng để soi prompt trước khi đốt tiền.
 - **Sửa lại prompt bị loại (`--retry_rejected`).** Mặc định TẮT. Bật lên thì sau step 2b,
   `step2b2_correct.py` đưa đúng lý do bị loại (thiếu/thừa) cho model sửa lại — CHỈ sửa
   đúng phần bị nêu lỗi, không viết lại từ đầu — rồi chấm lại bằng đúng judge của 2b
-  (kể cả ràng buộc `required_subject`). Đạt thì gộp vào tập đạt (`corrected: true`,
+  (kể cả ràng buộc chủ đề chính `required_facts`). Đạt thì gộp vào tập đạt (`corrected: true`,
   giữ `original_prompt` để audit); vẫn fail thì mới thật sự loại — **retry đúng 1 lần**,
   không lặp thêm. `step2c_split.py` tự phát hiện và gộp `corrected_passed.jsonl` nếu có,
   không cần cấu hình gì thêm.

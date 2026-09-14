@@ -98,11 +98,15 @@ def build_spec(sub: Dict[str, Any], persona: Dict[str, str]) -> Dict[str, Any]:
         "detail_level": sub["detail_level"],
         "length_hint": sub["length_hint"],
         "persona": persona,
+    }
+    if sub.get("chu_de_chinh"):
+        spec["chu_de_chinh"] = sub["chu_de_chinh"]
+    spec.update({
         "groups": [
             {"facts": g["facts"], **({"so_nhieu": True} if g.get("so_nhieu") else {})}
             for g in sub["groups"]
         ],
-    }
+    })
     if sub.get("background"):
         spec["boi_canh"] = sub["background"]
     phong_cach = [f for key in STYLE_FIELDS for f in (sub.get("style") or {}).get(key, [])]
@@ -210,7 +214,7 @@ def main() -> None:
             "user_prompt": item["user_prompt"],
             "n_words": item["n_words"],
             "checklist": sub["checklist"],
-            "required_subject": sub.get("required_subject"),
+            "required_facts": sub.get("required_facts") or [],
         })
 
     n_written = io_utils.write_jsonl(out_dir / "prompts.jsonl", merged)

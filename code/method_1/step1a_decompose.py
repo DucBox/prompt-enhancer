@@ -3,21 +3,26 @@
 
 Đầu vào : <out_root>/step0_normalized/targets.jsonl
 Đầu ra  : <out_root>/step1a_decompose/
-            decompose/<id>.json   {"concept_groups", "facts", "background_facts",
-                                   "style_facts", "field_priority"}
+            decompose/<id>.json   {"chu_de_chinh", "khop_goi_y", "concept_groups", "facts",
+                                   "background_facts", "style_facts", "field_priority",
+                                   "goi_y_chu_de"}
             decompose.jsonl       gộp lại thành một file
             failures.json
 
 Phân rã ĐẦY ĐỦ mọi trường mang nội dung, mỗi mệnh đề một ý, bằng tiếng Việt, xếp hạng
 theo độ quan trọng TRONG TỪNG TRƯỜNG:
+    chu_de_chinh      <- high_level_description (1-3 mệnh đề: bức ảnh VỀ CÁI GÌ)
     facts             <- elements[].desc
     background_facts  <- compositional_deconstruction.background
     style_facts       <- style_description.{photo | art_style, lighting, aesthetics}
-Không phân rã `medium` (enum) và `high_level_description` (chỉ làm ngữ cảnh xếp hạng).
+Không phân rã `medium` (enum).
 Bước này KHÔNG bỏ bớt thông tin -- chọn giữ/bỏ theo mức là việc của 1b.
 
-Chạy một lần rồi CACHE: file <id>.json đã có (và đúng schema hiện tại) thì bỏ qua,
-nên có thể dừng giữa chừng và chạy lại để tiếp tục.
+Gợi ý chủ đề (tên thư mục + common/topic_terms.json) chỉ để 1a THAM KHẢO cách gọi tên chủ đề;
+1a tự xác nhận ảnh có thể hiện chủ đề đó không (`khop_goi_y`).
+
+Chạy một lần rồi CACHE: file <id>.json đã có (đúng schema hiện tại VÀ cùng gợi ý chủ đề) thì
+bỏ qua, nên có thể dừng giữa chừng và chạy lại để tiếp tục.
 
 Ví dụ:
     python step1a_decompose.py --out_root test_1 --dry_run
@@ -30,7 +35,7 @@ import argparse
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from common import config, io_utils, llm, prompts, schema
+from common import config, io_utils, llm, prompts, schema, subjson
 
 STEP = "STEP 1a"
 
@@ -39,12 +44,16 @@ VALID_KINDS = {"subject", "color", "material", "attribute", "action", "position"
 # Các trường style được phân rã. `medium` là enum nên không phân rã.
 STYLE_FACT_FIELDS = ("photo", "art_style", "lighting", "aesthetics")
 
+# Chủ đề chính là ý cốt lõi, không phải bản tóm tắt -- quá 3 mệnh đề là đang liệt kê chi tiết.
+MAX_THEME_FACTS = 3
+MAX_THEME_WORDS = 10
+
 # Độ ưu tiên XUYÊN TRƯỜNG. Hiện chưa đánh giá nên mọi trường bằng nhau; sau này có thể
 # cho LLM chấm lại thành 2-3 mà không phải đổi schema.
 DEFAULT_FIELD_PRIORITY = 1
 
 # Cache sinh ra trước khi có các khoá này là schema cũ -- phải gọi lại, không dùng lẫn.
-CACHE_REQUIRED_KEYS = ("background_facts", "style_facts", "field_priority")
+CACHE_REQUIRED_KEYS = ("chu_de_chinh", "background_facts", "style_facts", "field_priority")
 
 
 def parse_args() -> argparse.Namespace:
@@ -92,6 +101,15 @@ def validate_decomposition(result: Any, target: Dict[str, Any]) -> List[str]:
         errors.append("facts rỗng hoặc sai kiểu")
     if errors:
         return errors
+
+    _check_ranked(result.get("chu_de_chinh"), "chu_de_chinh", errors)
+    theme = result.get("chu_de_chinh")
+    if isinstance(theme, list) and len(theme) > MAX_THEME_FACTS:
+        errors.append("chu_de_chinh có {} mệnh đề, tối đa {}".format(len(theme), MAX_THEME_FACTS))
+    if isinstance(theme, list):
+        n_words = sum(len(str(f.get("text", "")).split()) for f in theme if isinstance(f, dict))
+        if n_words > MAX_THEME_WORDS:
+            errors.append("chu_de_chinh có tổng {} từ, tối đa {}".format(n_words, MAX_THEME_WORDS))
 
     element_ids = {el.get("id") for el in schema.elements_of(target)}
 
@@ -181,6 +199,8 @@ def normalize_decomposition(result: Dict[str, Any]) -> Dict[str, Any]:
         field_priority[field] = DEFAULT_FIELD_PRIORITY
 
     return {
+        "chu_de_chinh": _clean_ranked(result.get("chu_de_chinh"), with_kind=False),
+        "khop_goi_y": bool(result.get("khop_goi_y", False)),
         "concept_groups": groups,
         "facts": facts,
         "background_facts": background_facts,
@@ -189,12 +209,16 @@ def normalize_decomposition(result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def is_cache_current(path: Path) -> bool:
+def is_cache_current(path: Path, hint: Optional[Dict[str, Any]] = None) -> bool:
+    """Đúng schema hiện tại; có `hint` thì cache còn phải sinh ra từ đúng gợi ý chủ đề đó
+    (sửa topic_terms.json thì ảnh thuộc chủ đề đó tự được gọi lại)."""
     try:
         item = io_utils.read_json(path)
     except (OSError, ValueError):
         return False
-    return isinstance(item, dict) and all(k in item for k in CACHE_REQUIRED_KEYS)
+    if not isinstance(item, dict) or not all(k in item for k in CACHE_REQUIRED_KEYS):
+        return False
+    return hint is None or item.get("goi_y_chu_de") == hint
 
 
 def main() -> None:
@@ -210,12 +234,15 @@ def main() -> None:
     cache_dir = out_dir / "decompose"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
+    topics = subjson.load_topic_terms()
+    print("bảng chủ đề: {} slug ({})".format(len(topics), subjson.TOPIC_TERMS_FILE))
+    hints = {row["id"]: subjson.topic_hint(row["id"], topics) for row in rows}
+
     if args.dry_run:
-        messages = prompts.build_step1a_messages(rows[0]["target_json"])
-        print("\n[DRY RUN] dựng được {} messages cho id={}".format(len(messages), rows[0]["id"]))
-        for m in messages:
-            preview = m["content"][:400].replace("\n", "\n    ")
-            print("\n  role={}\n    {}...".format(m["role"], preview))
+        row = rows[0]
+        messages = prompts.build_step1a_messages(row["target_json"], hints[row["id"]])
+        print("\n[DRY RUN] dựng được {} messages cho id={}".format(len(messages), row["id"]))
+        print("\n--- user cuối cùng ---\n{}".format(messages[-1]["content"][:1200]))
         return
 
     todo = []
@@ -224,7 +251,7 @@ def main() -> None:
     for row in rows:
         path = cache_dir / "{}.json".format(row["id"])
         if not args.overwrite and path.is_file():
-            if is_cache_current(path):
+            if is_cache_current(path, hints[row["id"]]):
                 n_cached += 1
                 continue
             n_stale += 1
@@ -242,7 +269,7 @@ def main() -> None:
 
         def process(row: Dict[str, Any]) -> Optional[str]:
             target = row["target_json"]
-            messages = prompts.build_step1a_messages(target)
+            messages = prompts.build_step1a_messages(target, hints[row["id"]])
             result = client.chat_json(
                 messages, temperature=args.temperature, max_tokens=args.max_tokens,
             )
@@ -250,6 +277,7 @@ def main() -> None:
             if errors:
                 raise llm.LLMError("đầu ra không hợp lệ: {}".format("; ".join(errors[:4])))
             cleaned = normalize_decomposition(result)
+            cleaned["goi_y_chu_de"] = hints[row["id"]]
             io_utils.write_json(cache_dir / "{}.json".format(row["id"]), cleaned)
             return row["id"]
 
@@ -263,7 +291,7 @@ def main() -> None:
     merged: List[Dict[str, Any]] = []
     for row in rows:
         path = cache_dir / "{}.json".format(row["id"])
-        if path.is_file() and is_cache_current(path):
+        if path.is_file() and is_cache_current(path, hints[row["id"]]):
             merged.append({"id": row["id"], **io_utils.read_json(path)})
 
     n_written = io_utils.write_jsonl(out_dir / "decompose.jsonl", merged)
@@ -273,7 +301,8 @@ def main() -> None:
     io_utils.summary(**{
         "mẫu xử lý": len(rows),
         "dùng lại cache": n_cached,
-        "cache schema cũ": n_stale,
+        "cache cũ (schema/gợi ý đổi)": n_stale,
+        "ảnh khớp gợi ý chủ đề": sum(1 for m in merged if m.get("khop_goi_y")),
         "gọi model": len(todo),
         "thất bại": len(failures),
         "ghi ra decompose.jsonl": n_written,

@@ -10,14 +10,15 @@ Ba prompt tương ứng ba lần gọi model:
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # =============================================================================
 # STEP 1a — gom nhóm khái niệm & phân rã mệnh đề
 # =============================================================================
 
-STEP1A_SYSTEM = r"""Bạn là công cụ phân tích mô tả ảnh. Đầu vào là một JSON mô tả chi tiết một bức ảnh.
-Nhiệm vụ của bạn gồm BỐN phần. Chỉ trả về đúng một JSON object, không giải thích gì thêm.
+STEP1A_SYSTEM = r"""Bạn là công cụ phân tích mô tả ảnh. Đầu vào gồm GỢI Ý CHỦ ĐỀ (goi_y_chu_de, lấy từ tên
+thư mục chứa ảnh) và một JSON mô tả chi tiết một bức ảnh.
+Nhiệm vụ của bạn gồm NĂM phần. Chỉ trả về đúng một JSON object, không giải thích gì thêm.
 
 Kết quả sẽ được một bước sau dùng để CHỌN LỌC thông tin cho các yêu cầu ngắn / vừa / dài.
 Vì vậy ở bước này:
@@ -36,6 +37,29 @@ Vì vậy ở bước này:
   Hãy dùng TOÀN BỘ JSON (high_level_description, chủ thể chính, các element khác) làm ngữ cảnh
   để xếp hạng: thông tin làm nên nét RIÊNG của bức ảnh này — thứ người dùng nhiều khả năng
   nhắc tới nhất — đứng trước; thông tin chung chung mà ảnh nào cũng có đứng sau.
+
+=== PHẦN 0: CHỦ ĐỀ CHÍNH (chu_de_chinh, khop_goi_y) ===
+Đọc high_level_description và trả lời: bức ảnh này VỀ CÁI GÌ? Viết 1-3 mệnh đề tiếng Việt
+(tổng không quá 10 từ) — thứ mà người dùng BẮT BUỘC phải nói khi đặt hàng đúng bức ảnh này,
+kể cả ở yêu cầu ngắn nhất. Mọi yêu cầu sinh ra sau này đều phải truyền tải đúng chủ đề này.
+- Bám theo high_level_description, KHÔNG bám theo element nào được tả nhiều nhất hay nhiều
+  người/vật nhất. Ví dụ: mô tả "a group of four people gathered around a pottery wheel,
+  shaping wet clay" thì chủ đề là ["nhóm người làm gốm", "quanh bàn xoay gốm"], KHÔNG phải
+  ["hai người phụ nữ", "một người đàn ông"].
+- Chủ đề là hoạt động / sự kiện / cả khung cảnh thì nêu đúng hoạt động / khung cảnh đó
+  (làm gốm, đua ghe, chợ đường phố...), không thay bằng danh sách người/vật tham gia.
+- Chỉ lấy ý CỐT LÕI. Không đưa màu sắc, chất liệu, ánh sáng, góc máy vào trừ khi chính nó làm
+  nên chủ đề (vd "tranh khắc gỗ").
+- goi_y_chu_de CHỈ ĐỂ THAM KHẢO cách gọi tên, KHÔNG bắt buộc phải xuất hiện:
+    * Ảnh thật sự thể hiện chủ đề gợi ý (kể cả khi mô tả gốc viết tiếng Anh hoặc gọi khác đi,
+      vd "ceramic teapot" với gợi ý "ấm tích") → gọi tên chủ đề bằng "thuat_ngu" hoặc một từ
+      trong "dong_nghia" hợp với ảnh nhất, và đặt "khop_goi_y": true.
+    * Mô tả gốc gọi CỤ THỂ hơn hoặc khác gợi ý mà vẫn đúng (gợi ý "Thành phố Hồ Chí Minh" nhưng
+      ảnh là "chợ đường phố Sài Gòn"; ảnh là một công trình cụ thể) → gọi theo mô tả gốc, vẫn
+      giữ tên địa danh nếu mô tả có, và đặt "khop_goi_y": true.
+    * Ảnh KHÔNG thể hiện chủ đề gợi ý (tên thư mục chỉ là từ khoá tìm kiếm) → bỏ qua gợi ý,
+      đặt "khop_goi_y": false. TUYỆT ĐỐI không ép thuật ngữ vào khi ảnh không có.
+- "rank" theo LUẬT CHUNG; mệnh đề rank 0 là cái cốt lõi nhất.
 
 === PHẦN 1: GOM NHÓM KHÁI NIỆM (concept_groups) ===
 Gom các element thành những "khái niệm" mà một NGƯỜI DÙNG BÌNH THƯỜNG sẽ nhắc tới như một thứ duy nhất.
@@ -81,6 +105,8 @@ KHÔNG phân rã "medium" và "color_palette". Chỉ tạo khoá cho trường T
 
 === ĐỊNH DẠNG ĐẦU RA ===
 {
+  "chu_de_chinh": [{"rank": 0, "text": "..."}],
+  "khop_goi_y": true,
   "concept_groups": [
     {"name": "...", "member_ids": [0,1], "cardinality": "exact:2", "cultural": false}
   ],
@@ -124,7 +150,15 @@ STEP1A_FEWSHOT_INPUT = {
     },
 }
 
+STEP1A_FEWSHOT_HINT = {
+    "ten_thu_muc": "cho noi cai rang",
+    "thuat_ngu": "chợ nổi Cái Răng",
+    "dong_nghia": ["Cái Răng"],
+}
+
 STEP1A_FEWSHOT_OUTPUT = {
+    "chu_de_chinh": [{"rank": 0, "text": "chợ nổi Cái Răng"}],
+    "khop_goi_y": True,
     "concept_groups": [
         {"name": "chợ nổi Cái Răng", "member_ids": [], "cardinality": "exact:1", "cultural": True},
         {"name": "những chiếc thuyền gỗ", "member_ids": [0, 3], "cardinality": "exact:2", "cultural": False},
@@ -184,13 +218,20 @@ STEP1A_FEWSHOT_OUTPUT = {
 }
 
 
-def build_step1a_messages(target_json: Dict[str, Any]) -> List[Dict[str, str]]:
+def _format_step1a_input(target_json: Dict[str, Any], hint: Optional[Dict[str, Any]]) -> str:
     dumps = lambda o: json.dumps(o, ensure_ascii=False, indent=2)  # noqa: E731
+    return "GỢI Ý CHỦ ĐỀ (goi_y_chu_de — chỉ tham khảo):\n{}\n\nMÔ TẢ ẢNH:\n{}".format(
+        dumps(hint or {}), dumps(target_json))
+
+
+def build_step1a_messages(
+    target_json: Dict[str, Any], hint: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, str]]:
     return [
         {"role": "system", "content": STEP1A_SYSTEM},
-        {"role": "user", "content": dumps(STEP1A_FEWSHOT_INPUT)},
-        {"role": "assistant", "content": dumps(STEP1A_FEWSHOT_OUTPUT)},
-        {"role": "user", "content": dumps(target_json)},
+        {"role": "user", "content": _format_step1a_input(STEP1A_FEWSHOT_INPUT, STEP1A_FEWSHOT_HINT)},
+        {"role": "assistant", "content": json.dumps(STEP1A_FEWSHOT_OUTPUT, ensure_ascii=False, indent=2)},
+        {"role": "user", "content": _format_step1a_input(target_json, hint)},
     ]
 
 
@@ -206,8 +247,9 @@ ngắn (short), vừa (medium), dài (long).
 Đầu vào là bản phân rã của MỘT bức ảnh. Mọi mệnh đề đã được viết bằng tiếng Việt và xếp theo
 độ quan trọng GIẢM DẦN trong từng danh sách:
 - "high_level_description": câu tóm tắt ảnh — chỉ để hiểu ngữ cảnh, không chọn.
+- "chu_de_chinh": các mệnh đề nói bức ảnh VỀ CÁI GÌ. Code TỰ ĐƯA chúng vào cả ba mức — KHÔNG
+  chọn lại, không tính vào số ý hay số từ của mức nào.
 - "medium": loại ảnh (photograph, illustration, 3d_render...).
-- "required_subject": tên nhóm chủ thể BẮT BUỘC (có thể null).
 - "groups": các nhóm khái niệm, nhóm đứng đầu là quan trọng nhất. Mỗi nhóm có "name",
   "cultural" (mang bản sắc Việt Nam), "cardinality", có thể có "so_luong" (vd "số lượng: 3"),
   và "elements" = danh sách mệnh đề của từng cá thể (mệnh đề đầu tiên là danh từ chủ thể).
@@ -223,7 +265,8 @@ Mức chi tiết được quyết định bởi ĐỘ PHỦ (nói tới bao nhi�
 kỹ tới đâu) và LOẠI THÔNG TIN — KHÔNG phải số từ.
 
 SHORT — người dùng chỉ nói thứ họ quan tâm nhất, bỏ qua phần còn lại của ảnh.
-- Chỉ nhóm chủ thể chính, cùng danh từ chủ thể của nó.
+- Chủ đề chính đã có sẵn. Được chọn thêm nhóm chủ thể chính (cùng danh từ chủ thể của nó) nếu
+  nó làm rõ chủ đề; chủ đề chính đã đủ thì "groups" để rỗng.
 - Thêm TỐI ĐA 2 ý, chọn trong số:
     * thuộc tính nổi bật nhất của chủ thể chính;
     * HOẶC một bối cảnh / địa điểm CÓ BẢN SẮC (Hồ Tây, phố cổ Hội An, cánh đồng lúa, bãi
@@ -232,7 +275,7 @@ SHORT — người dùng chỉ nói thứ họ quan tâm nhất, bỏ qua phần
   là true đều tính là MỘT ý.
 - KHÔNG lấy bối cảnh chung chung (mặt bàn gỗ, phông nền trắng, bức tường...).
 - KHÔNG lấy "style".
-- Tổng số từ của mọi mệnh đề (kể cả tên nhóm văn hoá) KHÔNG quá 16.
+- Tổng số từ của mọi mệnh đề (kể cả tên nhóm văn hoá, không tính chủ đề chính) KHÔNG quá 16.
 
 MEDIUM — người dùng tả những thứ chính của ảnh nhưng chưa đi vào chi tiết vụn.
 - Chủ thể chính với 2-4 thuộc tính nổi bật.
@@ -241,7 +284,7 @@ MEDIUM — người dùng tả những thứ chính của ảnh nhưng chưa đi
 - Tối đa 1 ý "style", CHỈ KHI nó thật sự đáng chú ý với bức ảnh này (chụp từ trên cao,
   flat lay, tranh khắc gỗ...). Không lấy thứ ảnh nào cũng có (ngang tầm mắt, lấy nét sâu,
   ánh sáng ban ngày...).
-- Tổng số từ KHÔNG quá 50.
+- Tổng số từ (không tính chủ đề chính) KHÔNG quá 50.
 
 LONG — người dùng tả gần như toàn bộ bức ảnh.
 - Mọi nhóm, với thuộc tính, vị trí, hành động.
@@ -257,7 +300,9 @@ LONG — người dùng tả gần như toàn bộ bức ảnh.
 3. Ưu tiên theo thứ tự xếp hạng, nhưng được bỏ qua mệnh đề hạng cao nếu nó chung chung,
    không đáng nói ở mức đó.
 4. LỒNG NHAU: mọi thứ có ở short phải có ở medium; mọi thứ có ở medium phải có ở long.
-5. Nếu "required_subject" khác null, nhóm đó PHẢI có mặt ở cả ba mức.
+5. Mọi thứ chọn thêm phải phục vụ "chu_de_chinh". Ưu tiên ý làm rõ chủ đề (hoạt động, địa điểm
+   có bản sắc, vật đặc trưng) hơn chi tiết lẻ về từng người/vật; KHÔNG chọn sao cho chủ đề bị
+   lấn át (ảnh làm gốm mà mức short chỉ liệt kê "người phụ nữ", "người đàn ông" là SAI).
 6. "so_luong" chép vào "facts" của nhóm khi con số là thông tin đáng nói. KHÔNG chọn khi tên
    nhóm đã tự thể hiện số lượng (đôi, cặp, bộ...).
 7. "medium": đặt true khi loại ảnh là thông tin đáng nói (tranh minh hoạ, ảnh dựng 3D...);
@@ -277,14 +322,12 @@ Chỉ trả về đúng một JSON object, không giải thích:
 - "facts" của mỗi nhóm là danh sách mệnh đề chọn từ "elements" của nhóm (và "so_luong" nếu chọn)."""
 
 
-STEP1B_FEWSHOT_INPUT = subjson.build_selection_input(
-    STEP1A_FEWSHOT_INPUT, STEP1A_FEWSHOT_OUTPUT, required_group_index=0,
-)
+STEP1B_FEWSHOT_INPUT = subjson.build_selection_input(STEP1A_FEWSHOT_INPUT, STEP1A_FEWSHOT_OUTPUT)
 
+# Nhóm "chợ nổi Cái Răng" trùng chủ đề chính nên không chọn lại -- code đã tự đưa vào mọi mức.
 STEP1B_FEWSHOT_OUTPUT = {
     "short": {
         "groups": [
-            {"name": "chợ nổi Cái Răng", "facts": []},
             {"name": "những chiếc thuyền gỗ", "facts": ["chiếc thuyền", "bằng gỗ"]},
         ],
         "background": [],
@@ -293,7 +336,6 @@ STEP1B_FEWSHOT_OUTPUT = {
     },
     "medium": {
         "groups": [
-            {"name": "chợ nổi Cái Răng", "facts": []},
             {"name": "những chiếc thuyền gỗ",
              "facts": ["chiếc thuyền", "số lượng: 2", "bằng gỗ", "màu tím", "là quán ăn nổi", "màu xanh"]},
             {"name": "người bán hàng đội nón lá", "facts": ["đội nón lá", "đang nấu đồ ăn"]},
@@ -304,7 +346,6 @@ STEP1B_FEWSHOT_OUTPUT = {
     },
     "long": {
         "groups": [
-            {"name": "chợ nổi Cái Răng", "facts": []},
             {"name": "những chiếc thuyền gỗ",
              "facts": ["chiếc thuyền", "số lượng: 2", "bằng gỗ", "màu tím", "là quán ăn nổi", "dài",
                        "nằm ngang giữa khung hình", "có khách trên thuyền", "màu xanh",
@@ -348,14 +389,18 @@ STEP2A_SYSTEM = r"""Bạn đang đóng vai NGƯỜI DÙNG muốn nhờ AI tạo 
 Bạn được cho một bản mô tả có cấu trúc. Hãy viết ra CÂU YÊU CẦU của bạn.
 Chỉ trả về đúng câu yêu cầu đó, không thêm lời dẫn, không giải thích, không đặt trong ngoặc kép.
 
-Bản mô tả gồm: "groups" (mỗi nhóm là các mệnh đề về một thứ trong ảnh), "boi_canh" (bối cảnh)
-và "phong_cach" (góc chụp, ánh sáng, phong cách, loại ảnh) nếu có.
+Bản mô tả gồm: "chu_de_chinh" (bức ảnh VỀ CÁI GÌ), "groups" (mỗi nhóm là các mệnh đề về một thứ
+trong ảnh), "boi_canh" (bối cảnh) và "phong_cach" (góc chụp, ánh sáng, phong cách, loại ảnh) nếu có.
 
 BẮT BUỘC
 - Viết như người ĐANG ĐẶT HÀNG một bức ảnh chưa tồn tại,
   KHÔNG phải người đang mô tả một bức ảnh có sẵn trước mặt.
 - Chỉ nói những gì có trong bản mô tả. Cấm thêm bất kỳ thông tin mới nào.
-- PHẢI nhắc đến ĐẦY ĐỦ mọi mệnh đề được cho — trong "groups", "boi_canh" và "phong_cach".
+- "chu_de_chinh" là ý chính: đọc câu yêu cầu phải hiểu ngay bức ảnh về cái gì (thường nói ngay từ
+  đầu). Các mệnh đề khác chỉ bổ sung cho chủ đề, KHÔNG được lấn át nó — ảnh "nhóm người làm gốm"
+  mà câu yêu cầu chỉ nói "hai phụ nữ và một người đàn ông" là SAI.
+- PHẢI nhắc đến ĐẦY ĐỦ mọi mệnh đề được cho — trong "chu_de_chinh", "groups", "boi_canh" và
+  "phong_cach".
   Được phép diễn đạt lại tự nhiên hơn, gộp chung với ý khác, KHÔNG được tự ý bỏ sót bất kỳ
   mệnh đề nào chỉ vì thấy không quan trọng — thiếu một mệnh đề cũng bị coi là lỗi giống hệt
   như thêm bịa.
@@ -386,8 +431,8 @@ STEP2A_FEWSHOT = [
             "length_hint": "8-20 từ",
             "persona": {"vai": "user phổ thông", "giọng": "mô tả trung tính",
                         "ngôn ngữ": "tiếng Việt"},
+            "chu_de_chinh": ["chợ nổi Cái Răng"],
             "groups": [
-                {"facts": ["chợ nổi Cái Răng"]},
                 {"facts": ["chiếc thuyền", "bằng gỗ"], "so_nhieu": True},
             ],
         },
@@ -399,8 +444,8 @@ STEP2A_FEWSHOT = [
             "length_hint": "30-60 từ",
             "persona": {"vai": "designer", "giọng": "ra lệnh",
                         "ngôn ngữ": "tiếng Việt"},
+            "chu_de_chinh": ["chợ nổi Cái Răng"],
             "groups": [
-                {"facts": ["chợ nổi Cái Răng"]},
                 {"facts": ["chiếc thuyền", "số lượng: 3", "bằng gỗ", "một chiếc màu tím",
                            "là quán ăn nổi"]},
                 {"facts": ["những người bán hàng", "đội nón lá", "đang nấu đồ ăn"], "so_nhieu": True},
@@ -417,8 +462,8 @@ STEP2A_FEWSHOT = [
             "length_hint": "100-200 từ",
             "persona": {"vai": "user phổ thông", "giọng": "kể lể lan man",
                         "ngôn ngữ": "tiếng Việt"},
+            "chu_de_chinh": ["chợ nổi Cái Răng"],
             "groups": [
-                {"facts": ["chợ nổi Cái Răng"]},
                 {"facts": ["chiếc thuyền", "màu tím", "bằng gỗ", "dài", "là quán ăn nổi"]},
                 {"facts": ["những người bán hàng", "đội nón lá", "đang nấu đồ ăn"], "so_nhieu": True},
                 {"facts": ["chiếc thuyền", "chở sọt trái cây"]},
@@ -438,12 +483,27 @@ STEP2A_FEWSHOT = [
             "length_hint": "8-20 từ",
             "persona": {"vai": "user phổ thông", "giọng": "ra lệnh",
                         "ngôn ngữ": "tiếng Việt"},
+            "chu_de_chinh": ["áo dài nam", "khăn xếp"],
             "groups": [
                 {"facts": ["áo dài nam", "màu đỏ"]},
                 {"facts": ["khăn xếp"]},
             ],
         },
         "Cho mình ảnh áo dài nam màu đỏ đi kèm khăn xếp",
+    ),
+    (
+        # Chủ đề là HOẠT ĐỘNG: người trong ảnh chỉ là chi tiết bổ sung, không thay được chủ đề.
+        {
+            "detail_level": "short",
+            "length_hint": "8-20 từ",
+            "persona": {"vai": "sinh viên làm đồ án", "giọng": "mô tả trung tính",
+                        "ngôn ngữ": "tiếng Việt"},
+            "chu_de_chinh": ["nhóm người làm gốm", "quanh bàn xoay gốm"],
+            "groups": [
+                {"facts": ["cô gái nhỏ"]},
+            ],
+        },
+        "Muốn có tấm ảnh một nhóm người đang làm gốm quanh bàn xoay gốm, trong nhóm có một cô gái nhỏ.",
     ),
 ]
 
@@ -498,7 +558,9 @@ Nhưng phần vị trí CỤ THỂ vẫn phải đúng — trái/phải, tay/tai
     vẫn tính là THIẾU (không được bỏ qua chỉ vì đây là mệnh đề vị trí).
   - Mệnh đề "ở tai phải thanh đồng", prompt không nhắc bên nào cả → THIẾU.
 
-Chỉ trả về đúng một JSON object, không giải thích:
+Chỉ trả về đúng một JSON object, không giải thích.
+Mỗi phần tử trong "missing" phải CHÉP NGUYÊN VĂN một mệnh đề trong danh sách được cho — không
+diễn đạt lại, không gộp, không tóm tắt:
 {
   "missing": ["mệnh đề bị thiếu"],
   "extra": ["thông tin bị thêm"],

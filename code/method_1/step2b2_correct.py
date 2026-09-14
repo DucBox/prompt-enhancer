@@ -13,7 +13,7 @@ thì rejected.jsonl của 2b vẫn là danh sách cuối cùng bị loại, y nh
 
 Với mỗi prompt bị loại, đưa đúng lý do bị loại (thiếu/thừa) cho model sửa lại — CHỈ
 sửa đúng phần bị nêu lỗi, không viết lại từ đầu — rồi chấm lại bằng đúng judge của
-bước 2b (dùng lại step2b_filter.decide(), kể cả ràng buộc required_subject). Đạt
+bước 2b (dùng lại step2b_filter.decide(), kể cả ràng buộc chủ đề chính required_facts). Đạt
 thì gộp vào tập đạt (đánh dấu corrected=true); vẫn fail thì MỚI thật sự loại — không
 lặp lại lần hai.
 
@@ -105,7 +105,7 @@ def main() -> None:
             if not isinstance(verdict, dict):
                 raise llm.LLMError("judge trả về không phải object")
 
-            decision = step2b.decide(verdict, args, row.get("required_subject"))
+            decision = step2b.decide(verdict, args, step2b.required_facts_of(row))
             io_utils.write_json(cache_dir / "{}.json".format(key_of(row)), {
                 "corrected_prompt": corrected,
                 "verdict": verdict,

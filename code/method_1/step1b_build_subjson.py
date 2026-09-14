@@ -12,8 +12,8 @@
 
 Mỗi ảnh gọi model MỘT lần cho cả 3 mức. LLM tự quyết giữ/bỏ theo định nghĩa mức trong
 STEP1B_SYSTEM (độ phủ × độ sâu × loại thông tin); code không chọn nội dung, chỉ kiểm
-tra lựa chọn (chép nguyên văn, lồng nhau, chủ thể bắt buộc, trần từ) và gọi lại kèm
-danh sách lỗi nếu sai. Checklist ghép thẳng từ các mệnh đề đã chọn.
+tra lựa chọn (chép nguyên văn, lồng nhau, trần từ) và gọi lại kèm danh sách lỗi nếu sai.
+Checklist = chủ đề chính của 1a (code tự chèn vào cả ba mức) + các mệnh đề đã chọn.
 
 Hết lượt sửa mà vẫn còn lỗi thì KHÔNG bỏ cả ảnh: giữ các mức tự hợp lệ và lồng nhau với
 nhau (subjson.evaluate_selection), chỉ bỏ mức hỏng. Ảnh giữ một phần vẫn được cache; chạy lại
@@ -160,11 +160,7 @@ def main() -> None:
 
     inputs: Dict[str, Dict[str, Any]] = {}
     for row_id in common_ids:
-        decomposition = decompositions[row_id]
-        required_index = subjson.find_required_group_index(
-            decomposition.get("concept_groups") or [], row_id)
-        inputs[row_id] = subjson.build_selection_input(
-            targets[row_id], decomposition, required_index)
+        inputs[row_id] = subjson.build_selection_input(targets[row_id], decompositions[row_id])
 
     if args.dry_run:
         row_id = common_ids[0]
