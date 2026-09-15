@@ -311,6 +311,47 @@ class CausalLMCollator:
         }
 
 
+def supervised_suffix_len(labels: torch.Tensor) -> int:
+    """Số vị trí cuối chuỗi cần logits để phủ MỌI token có nhãn trong batch (+1 vì dịch nhãn).
+
+    Nhãn chỉ nằm ở đuôi (sau prefix system+user), padding bên phải -> chỉ cần logits cho đoạn
+    từ token có nhãn đầu tiên sớm nhất tới hết chuỗi, không phải cả ~2k token system prompt.
+    """
+    length = labels.shape[1]
+    supervised = labels != -100
+    if not bool(supervised.any()):
+        return length
+    first = torch.where(supervised.any(dim=1), supervised.int().argmax(dim=1),
+                        torch.full_like(labels[:, 0], length))
+    return min(length, length - int(first.min().item()) + 1)
+
+
+class SuffixLossTrainer(Trainer):
+    """Tính loss chỉ trên logits của đoạn đuôi có nhãn (logits_to_keep).
+
+    Logits vocab ~248k cho cả chuỗi ~3k token là vài GB ở float32 -- đúng chỗ OOM trong
+    cross_entropy. Kết quả loss giống hệt cách tính mặc định (các token bị bỏ vốn có nhãn -100).
+    """
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        # Trả loss trung bình mỗi micro-batch -> để Trainer tự chia cho grad_accum.
+        self.model_accepts_loss_kwargs = False
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        labels = inputs.pop("labels")
+        keep = supervised_suffix_len(labels)
+        outputs = model(**inputs, logits_to_keep=keep, use_cache=False)
+        # logits vị trí [L-keep, L-1]; bỏ vị trí cuối, dự đoán token [L-keep+1, L-1].
+        # Nếu bản transformers bỏ qua logits_to_keep (trả logits cả chuỗi) thì tự cắt đuôi.
+        logits = outputs.logits[:, -keep:-1, :]
+        targets = labels[:, labels.shape[1] - keep + 1:]
+        loss = torch.nn.functional.cross_entropy(
+            logits.float().reshape(-1, logits.shape[-1]), targets.reshape(-1), ignore_index=-100,
+        )
+        return (loss, outputs) if return_outputs else loss
+
+
 def load_unsloth_model(args: argparse.Namespace):
     from unsloth import FastModel
 
@@ -364,7 +405,7 @@ def load_hf_model(args: argparse.Namespace, local_rank: int):
     This is data-parallel QLoRA, not tensor parallelism: every A100 stores a quantized
     copy of the base model, while only LoRA gradients are synchronized.
     """
-    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+    from peft import LoraConfig, get_peft_model
     import transformers
     from transformers import AutoProcessor, BitsAndBytesConfig
 
@@ -402,7 +443,13 @@ def load_hf_model(args: argparse.Namespace, local_rank: int):
     if model is None:
         raise RuntimeError("Không lớp Auto nào của transformers nạp được model -- kiểm tra bản transformers")
     model.config.use_cache = False
-    model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+    # KHÔNG dùng peft.prepare_model_for_kbit_training: nó nâng MỌI tham số không lượng tử hoá
+    # (embedding + lm_head vocab ~248k, vision tower, norm) lên float32 -- thêm ~10GB/GPU, đủ
+    # làm OOM A100 40GB. Giữ bf16, chỉ bật checkpointing + cho input embeddings nhận grad.
+    for param in model.parameters():
+        param.requires_grad_(False)
+    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    model.enable_input_require_grads()
 
     targets = discover_language_lora_targets(model)
     if local_rank == 0:
@@ -499,7 +546,9 @@ def main() -> None:
     )
 
     collator = CausalLMCollator(pad_token_id=tokenizer.pad_token_id)
-    trainer = Trainer(
+    # Unsloth tự vá phần tính loss; chỉ backend hf cần cắt logits về đoạn có nhãn.
+    trainer_cls = SuffixLossTrainer if args.backend == "hf" else Trainer
+    trainer = trainer_cls(
         model=model,
         args=training_args,
         train_dataset=train_ds,
