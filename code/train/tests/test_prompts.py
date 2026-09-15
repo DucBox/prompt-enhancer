@@ -83,6 +83,40 @@ class TestBuildSystemPrompt(unittest.TestCase):
             text = prompts.build_system_prompt(level)
             self.assertIn("Vietnamese or in English", text)
 
+    def test_output_contract_is_single_minified_object_without_extra_keys(self):
+        for level in prompts.LEVELS:
+            text = prompts.build_system_prompt(level)
+            self.assertIn("minified JSON on a single line", text)
+            for key in ("bbox", "color_palette", "aspect_ratio"):
+                self.assertIn("no " + key, text)
+
+    def test_vietnamese_terms_kept_with_optional_gloss(self):
+        """Nhãn Y giữ tên Việt, 88/199 ảnh kèm gloss tiếng Anh trong ngoặc (76 ảnh ở HLD)."""
+        text = prompts.BASE_SYSTEM_PROMPT
+        self.assertIn("full diacritics", text)
+        self.assertIn("Áo ngũ thân (traditional five-panel tunic)", text)
+        self.assertIn("Name the term in high_level_description", text)
+
+    def test_activity_request_keeps_the_activity_as_main_subject(self):
+        self.assertIn("making pottery", prompts.BASE_SYSTEM_PROMPT)
+        self.assertIn("not merely list", prompts.BASE_SYSTEM_PROMPT)
+
+    def test_vague_counts_stay_vague(self):
+        self.assertIn("Never invent a precise number", prompts.BASE_SYSTEM_PROMPT)
+
+    def test_does_not_import_creative_rules_that_contradict_real_captions(self):
+        """Luật sáng tác của magic prompt v1 trái với caption ảnh thật (Y có 'warm' ở ~20%
+        dòng, hiếm text element, tách phụ kiện thành element) -- không được đưa vào."""
+        text = prompts.BASE_SYSTEM_PROMPT.lower()
+        for banned in ("iphone", "text everywhere", "never use warm", "transparent background"):
+            self.assertNotIn(banned, text)
+
+    def test_prompt_stays_compact_for_sequence_budget(self):
+        """Prompt lặp lại ở mọi mẫu: giữ dưới ~1200 từ để mẫu dài nhất (X+Y ~5.1k ký tự)
+        vẫn vừa max_seq_length 4096."""
+        for level in prompts.LEVELS:
+            self.assertLess(len(prompts.build_system_prompt(level).split()), 1200, level)
+
     def test_schema_documents_both_style_key_orders(self):
         """Ideogram dùng hai thứ tự khác nhau: ảnh chụp thì `photo` TRƯỚC `medium`,
         còn lại thì `art_style` SAU `medium`. Gộp làm một là sai một nửa."""

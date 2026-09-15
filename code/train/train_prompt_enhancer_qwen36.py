@@ -38,6 +38,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+
+def _wants_unsloth(argv: List[str]) -> bool:
+    for i, arg in enumerate(argv):
+        if arg == "--backend" and i + 1 < len(argv):
+            return argv[i + 1] == "unsloth"
+        if arg.startswith("--backend="):
+            return arg.split("=", 1)[1] == "unsloth"
+    return True  # --backend mặc định là unsloth
+
+
+# Unsloth phải được import TRƯỚC transformers/peft thì mới vá được kernel; import muộn (trong
+# load_unsloth_model) chỉ cảnh báo và chạy chậm hơn. Chỉ làm khi chạy thẳng script với backend
+# unsloth -- check_env.py import module này thì không kéo unsloth vào.
+if __name__ == "__main__" and _wants_unsloth(sys.argv[1:]):
+    import unsloth  # noqa: F401,E402
+
 import torch
 from datasets import Dataset
 from transformers import Trainer, TrainingArguments, set_seed
@@ -343,7 +359,8 @@ def load_hf_model(args: argparse.Namespace, local_rank: int):
     copy of the base model, while only LoRA gradients are synchronized.
     """
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-    from transformers import AutoModelForMultimodalLM, AutoProcessor, BitsAndBytesConfig
+    import transformers
+    from transformers import AutoProcessor, BitsAndBytesConfig
 
     torch.cuda.set_device(local_rank)
     compute_dtype = torch.bfloat16
@@ -355,14 +372,29 @@ def load_hf_model(args: argparse.Namespace, local_rank: int):
     )
 
     processor = AutoProcessor.from_pretrained(args.model_name, trust_remote_code=True)
-    model = AutoModelForMultimodalLM.from_pretrained(
-        args.model_name,
-        quantization_config=bnb,
-        torch_dtype=compute_dtype,
-        device_map={"": local_rank},
-        trust_remote_code=True,
-        low_cpu_mem_usage=True,
-    )
+    # Qwen3_5ForConditionalGeneration: tuỳ bản transformers mà nằm trong mapping của
+    # AutoModelForMultimodalLM hay AutoModelForImageTextToText -- thử lần lượt.
+    model = None
+    for auto_name in ("AutoModelForMultimodalLM", "AutoModelForImageTextToText"):
+        auto_cls = getattr(transformers, auto_name, None)
+        if auto_cls is None:
+            continue
+        try:
+            model = auto_cls.from_pretrained(
+                args.model_name,
+                quantization_config=bnb,
+                torch_dtype=compute_dtype,
+                device_map={"": local_rank},
+                trust_remote_code=True,
+                low_cpu_mem_usage=True,
+            )
+        except ValueError as e:  # "Unrecognized configuration class ... for this kind of AutoModel"
+            if local_rank == 0:
+                print(f"HF backend: {auto_name} không nhận model này ({str(e)[:120]}), thử lớp khác")
+            continue
+        break
+    if model is None:
+        raise RuntimeError("Không lớp Auto nào của transformers nạp được model -- kiểm tra bản transformers")
     model.config.use_cache = False
     model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
 

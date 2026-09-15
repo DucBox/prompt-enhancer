@@ -46,6 +46,28 @@ system prompt được lưu lại trong adapter output (`system_prompt_short.txt
 `system_prompt_medium.txt`, `system_prompt_long.txt`) — app tầng trên đọc đúng
 file tương ứng khi gọi model.
 
+## Nội dung system prompt (exp1)
+
+Prompt ([`prompts.py`](prompts.py)) mô tả **đúng phân phối nhãn Y thật** — caption của ảnh thật
+trong `test_5_new` — và mượn kỷ luật viết caption từ magic prompt v1 của Ideogram 4
+(`third_party/ideogram4/src/ideogram4/magic_prompt_system_prompts/v1.txt`), nhưng **chỉ những
+luật dữ liệu thật sự tuân theo**:
+
+| Phần | Nội dung | Căn cứ trên dữ liệu |
+|---|---|---|
+| OUTPUT CONTRACT | một JSON minified, đúng thứ tự key, không bbox/color_palette/aspect_ratio/id | 573/573 dòng đúng thứ tự key |
+| FIDELITY | giữ mọi ràng buộc; số mơ hồ giữ mơ hồ; chủ đề là hoạt động/cảnh thì phải thể hiện hoạt động | lỗi lệch chủ đề ở ảnh làm gốm (exp1 release) |
+| VIETNAMESE TERMS | giữ tên Việt đủ dấu, nêu trong HLD, gloss tiếng Anh trong ngoặc tuỳ chọn | 154/199 HLD có thuật ngữ Việt; 88 ảnh có gloss, 76 ở HLD |
+| FIELD GUIDE | HLD một câu; tag aesthetics ngắn; lighting = nguồn + tính chất; photo = góc + cỡ cảnh + lấy nét; desc một câu, danh tính → thuộc tính → vị trí | HLD 1 câu 182/199; desc p50 18 từ, 1 câu; 62% desc có vị trí |
+
+**Không** mượn các luật sáng tác của v1 vì trái với caption ảnh thật: cấm "warm" (Y có ở ~20%
+dòng), mặc định kiểu iPhone, "text everywhere" (cả tập chỉ 6 text element), một chủ thể = một
+element (Y tách phụ kiện đeo/cầm ở 90 element), sàn luôn là background. Khi SFT, luật trái nhãn
+chỉ là nhiễu — model học theo Y.
+
+Prompt lặp lại ở mọi mẫu nên giữ dưới 1200 từ (test canh). Ước lượng mẫu dài nhất của
+`test_5_new` ~3.1k token < `--max_seq_length 4096`; số chính xác xem `check_env.py --data_file`.
+
 ## Kiểm tra môi trường trước khi train
 
 ```bash
@@ -82,6 +104,17 @@ torchrun --nproc_per_node=4 train_prompt_enhancer_qwen36.py \
   --mode no_cot \
   --backend hf
 ```
+
+**1 GPU hay nhiều GPU:**
+
+* `--backend unsloth` — **chỉ 1 GPU** (script chủ động chặn khi `WORLD_SIZE > 1`, vì Unsloth
+  bản mã nguồn mở không hỗ trợ multi-GPU). Nhanh và tiết kiệm VRAM nhất; QLoRA 27B vừa một A100 40GB.
+* `--backend hf` + `torchrun` — **nhiều GPU kiểu data-parallel (DDP)**: MỖI GPU giữ một bản
+  model 4-bit đầy đủ, chỉ đồng bộ gradient LoRA. Tăng tốc theo số GPU nhưng **không chia nhỏ
+  model** — mỗi GPU vẫn phải chứa được cả model (27B nf4 ~15GB, cộng embedding/lm_head bị
+  `prepare_model_for_kbit_training` nâng lên float32 ~10GB, cộng activation). A100 80GB thoải
+  mái; 40GB sát giới hạn, giảm `--max_seq_length` nếu OOM. `--global_batch_size` được giữ
+  nguyên, grad accumulation tự chia theo số GPU.
 
 `--mode` ở đây là chế độ suy luận (`cot` train kèm `<think>`, `no_cot` chỉ train
 JSON trực tiếp) — khác với `mode` (short/medium/long) trong dữ liệu, tên trùng
