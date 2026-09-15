@@ -49,19 +49,85 @@ def _wants_unsloth(argv: List[str]) -> bool:
     return True  # --backend mặc định là unsloth
 
 
+def _argv_value(argv: List[str], flag: str) -> Optional[str]:
+    for i, arg in enumerate(argv):
+        if arg == flag and i + 1 < len(argv):
+            return argv[i + 1]
+        if arg.startswith(flag + "="):
+            return arg.split("=", 1)[1]
+    return None
+
+
+# --model_name là folder local -> tự bật chế độ offline HF (server không ra mạng: không bật thì
+# from_pretrained cố gọi Hub và treo rất lâu). Phải đặt TRƯỚC khi import transformers /
+# huggingface_hub vì chúng đọc biến này lúc import. Người dùng đã tự đặt thì giữ nguyên.
+if __name__ == "__main__":
+    _model_arg = _argv_value(sys.argv[1:], "--model_name")
+    if _model_arg and os.path.isdir(_model_arg):
+        for _var in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE"):
+            os.environ.setdefault(_var, "1")
+
+
+# ---------------------------------------------------------------------------------------
+# DEBUG: bật bằng --debug hoặc PE_DEBUG=1. Phải quyết định TRƯỚC khi import torch (argparse
+# chạy sau import) nên đọc thẳng sys.argv. Mỗi dòng log có rank + thời gian từ lúc khởi động +
+# thời gian của bước, flush ngay (không bị buffer). Ngoài ra faulthandler tự in stack của MỌI
+# luồng mỗi PE_DEBUG_STACK_EVERY giây (mặc định 300, 0 = tắt) -> treo ở đâu thì thấy ngay.
+# ---------------------------------------------------------------------------------------
+import contextlib  # noqa: E402
+import faulthandler  # noqa: E402
+import time  # noqa: E402
+
+DEBUG = "--debug" in sys.argv[1:] or os.environ.get("PE_DEBUG", "") == "1"
+_T0 = time.time()
+
+
+def dbg(msg: str) -> None:
+    if DEBUG:
+        rank = os.environ.get("RANK", "0")
+        print(f"[debug r{rank} +{time.time() - _T0:7.1f}s] {msg}", file=sys.stderr, flush=True)
+
+
+@contextlib.contextmanager
+def dbg_step(name: str):
+    """Log BẮT ĐẦU / XONG (kèm thời gian) quanh một bước; không làm gì khi tắt debug."""
+    if not DEBUG:
+        yield
+        return
+    start = time.time()
+    dbg(f"-> {name} ...")
+    yield
+    dbg(f"<- {name} xong ({time.time() - start:.1f}s)")
+
+
+if DEBUG:
+    _stack_every = int(os.environ.get("PE_DEBUG_STACK_EVERY", "300"))
+    faulthandler.enable(file=sys.stderr)
+    if _stack_every > 0:
+        faulthandler.dump_traceback_later(_stack_every, repeat=True, file=sys.stderr)
+    dbg(f"debug bật; python={sys.version.split()[0]} pid={os.getpid()} "
+        f"LOCAL_RANK={os.environ.get('LOCAL_RANK')} WORLD_SIZE={os.environ.get('WORLD_SIZE')} "
+        f"HF_HUB_OFFLINE={os.environ.get('HF_HUB_OFFLINE')} stack mỗi {_stack_every}s")
+
+
 # Unsloth phải được import TRƯỚC transformers/peft thì mới vá được kernel; import muộn (trong
 # load_unsloth_model) chỉ cảnh báo và chạy chậm hơn. Chỉ làm khi chạy thẳng script với backend
 # unsloth -- check_env.py import module này thì không kéo unsloth vào.
 if __name__ == "__main__" and _wants_unsloth(sys.argv[1:]):
-    import unsloth  # noqa: F401,E402
+    with dbg_step("import unsloth"):
+        import unsloth  # noqa: F401,E402
 
-import torch
-from datasets import Dataset
-from transformers import Trainer, TrainingArguments, set_seed
+with dbg_step("import torch"):
+    import torch  # noqa: E402
+with dbg_step("import datasets"):
+    from datasets import Dataset  # noqa: E402
+with dbg_step("import transformers"):
+    from transformers import Trainer, TrainerCallback, TrainingArguments, set_seed  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from data_utils import read_jsonl_rows, target_to_minified_json  # noqa: E402
-from prompts import LEVELS, build_system_prompt  # noqa: E402
+with dbg_step("import data_utils, prompts"):
+    from data_utils import read_jsonl_rows, target_to_minified_json  # noqa: E402
+    from prompts import LEVELS, build_system_prompt  # noqa: E402
 
 
 # Qwen3.6 hybrid language stack: standard attention + GatedDeltaNet + MLP.
@@ -127,6 +193,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--allow_bbox_palette", action="store_true",
                    help="By default, reject targets containing bbox/color_palette to match this PE project")
     p.add_argument("--skip_json_validation", action="store_true")
+    p.add_argument("--debug", action="store_true",
+                   help="In log từng bước (import, load model, data, train) kèm thời gian + VRAM, "
+                        "và tự in stack mọi luồng mỗi PE_DEBUG_STACK_EVERY giây. Tương đương PE_DEBUG=1.")
     return p.parse_args()
 
 
@@ -257,7 +326,9 @@ def encode_record(ex: Dict[str, Any], tokenizer, args: argparse.Namespace,
 
 def prepare_dataset(path: str, tokenizer, args: argparse.Namespace,
                     system_prompt_override: Optional[str]) -> Dataset:
-    raw = read_jsonl_rows(path)  # KHÔNG dùng load_dataset("json") -- xem data_utils.py
+    with dbg_step(f"đọc {path}"):
+        raw = read_jsonl_rows(path)  # KHÔNG dùng load_dataset("json") -- xem data_utils.py
+    dbg(f"{len(raw)} dòng, bắt đầu encode (apply_chat_template)")
     rows: List[Dict[str, Any]] = []
     errors = 0
     too_long = 0
@@ -273,7 +344,10 @@ def prepare_dataset(path: str, tokenizer, args: argparse.Namespace,
         if not item.pop("_keep"):
             too_long += 1
             continue
-        item.pop("_length")
+        length = item.pop("_length")
+        if DEBUG and i < 3:
+            n_sup = sum(1 for lab in item["labels"] if lab != -100)
+            dbg(f"row {i}: {length} token, {n_sup} token có nhãn")
         rows.append(item)
 
     if not rows:
@@ -311,6 +385,16 @@ class CausalLMCollator:
         }
 
 
+def cuda_mem() -> str:
+    """VRAM của GPU hiện tại -- chỉ dùng cho log debug."""
+    if not torch.cuda.is_available():
+        return "no cuda"
+    gib = 1024 ** 3
+    return (f"VRAM alloc={torch.cuda.memory_allocated() / gib:.1f}G "
+            f"reserved={torch.cuda.memory_reserved() / gib:.1f}G "
+            f"peak={torch.cuda.max_memory_allocated() / gib:.1f}G")
+
+
 def supervised_suffix_len(labels: torch.Tensor) -> int:
     """Số vị trí cuối chuỗi cần logits để phủ MỌI token có nhãn trong batch (+1 vì dịch nhãn).
 
@@ -326,6 +410,30 @@ def supervised_suffix_len(labels: torch.Tensor) -> int:
     return min(length, length - int(first.min().item()) + 1)
 
 
+class DebugStepCallback(TrainerCallback):
+    """Chỉ gắn khi --debug: log mỗi optimizer step (thời gian + VRAM) để thấy chậm/treo ở step nào."""
+
+    def __init__(self) -> None:
+        self._t = time.time()
+
+    def on_train_begin(self, args, state, control, **kw):
+        dbg(f"on_train_begin: max_steps={state.max_steps} | {cuda_mem()}")
+        self._t = time.time()
+
+    def on_step_begin(self, args, state, control, **kw):
+        dbg(f"step {state.global_step + 1} bắt đầu")
+        self._t = time.time()
+
+    def on_step_end(self, args, state, control, **kw):
+        dbg(f"step {state.global_step} xong ({time.time() - self._t:.1f}s) | {cuda_mem()}")
+
+    def on_evaluate(self, args, state, control, **kw):
+        dbg(f"evaluate xong tại step {state.global_step}")
+
+    def on_save(self, args, state, control, **kw):
+        dbg(f"save checkpoint tại step {state.global_step}")
+
+
 class SuffixLossTrainer(Trainer):
     """Tính loss chỉ trên logits của đoạn đuôi có nhãn (logits_to_keep).
 
@@ -338,9 +446,15 @@ class SuffixLossTrainer(Trainer):
         # Trả loss trung bình mỗi micro-batch -> để Trainer tự chia cho grad_accum.
         self.model_accepts_loss_kwargs = False
 
+    _debug_calls = 0
+
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         labels = inputs.pop("labels")
         keep = supervised_suffix_len(labels)
+        if DEBUG and self._debug_calls < 5:
+            self._debug_calls += 1
+            dbg(f"compute_loss #{self._debug_calls}: batch={tuple(labels.shape)} logits_to_keep={keep} "
+                f"| {cuda_mem()}")
         outputs = model(**inputs, logits_to_keep=keep, use_cache=False)
         # logits vị trí [L-keep, L-1]; bỏ vị trí cuối, dự đoán token [L-keep+1, L-1].
         # Nếu bản transformers bỏ qua logits_to_keep (trả logits cả chuỗi) thì tự cắt đuôi.
@@ -405,11 +519,15 @@ def load_hf_model(args: argparse.Namespace, local_rank: int):
     This is data-parallel QLoRA, not tensor parallelism: every A100 stores a quantized
     copy of the base model, while only LoRA gradients are synchronized.
     """
-    from peft import LoraConfig, get_peft_model
+    with dbg_step("import peft"):
+        from peft import LoraConfig, get_peft_model
     import transformers
-    from transformers import AutoProcessor, BitsAndBytesConfig
+    with dbg_step("import bitsandbytes"):
+        from transformers import AutoProcessor, BitsAndBytesConfig
+        import bitsandbytes  # noqa: F401  -- import sớm để lỗi/treo của bnb lộ ra ở đây
 
-    torch.cuda.set_device(local_rank)
+    with dbg_step(f"torch.cuda.set_device({local_rank})"):
+        torch.cuda.set_device(local_rank)
     compute_dtype = torch.bfloat16
     bnb = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -418,7 +536,8 @@ def load_hf_model(args: argparse.Namespace, local_rank: int):
         bnb_4bit_compute_dtype=compute_dtype,
     )
 
-    processor = AutoProcessor.from_pretrained(args.model_name, trust_remote_code=True)
+    with dbg_step(f"AutoProcessor.from_pretrained({args.model_name}) -- treo ở đây thường do thiếu HF_HUB_OFFLINE=1"):
+        processor = AutoProcessor.from_pretrained(args.model_name, trust_remote_code=True)
     # Qwen3_5ForConditionalGeneration: tuỳ bản transformers mà nằm trong mapping của
     # AutoModelForMultimodalLM hay AutoModelForImageTextToText -- thử lần lượt.
     model = None
@@ -426,6 +545,7 @@ def load_hf_model(args: argparse.Namespace, local_rank: int):
         auto_cls = getattr(transformers, auto_name, None)
         if auto_cls is None:
             continue
+        dbg(f"-> {auto_name}.from_pretrained (4-bit nf4) ... | {cuda_mem()}")
         try:
             model = auto_cls.from_pretrained(
                 args.model_name,
@@ -439,6 +559,7 @@ def load_hf_model(args: argparse.Namespace, local_rank: int):
             if local_rank == 0:
                 print(f"HF backend: {auto_name} không nhận model này ({str(e)[:120]}), thử lớp khác")
             continue
+        dbg(f"<- {auto_name}.from_pretrained xong | {cuda_mem()}")
         break
     if model is None:
         raise RuntimeError("Không lớp Auto nào của transformers nạp được model -- kiểm tra bản transformers")
@@ -446,12 +567,14 @@ def load_hf_model(args: argparse.Namespace, local_rank: int):
     # KHÔNG dùng peft.prepare_model_for_kbit_training: nó nâng MỌI tham số không lượng tử hoá
     # (embedding + lm_head vocab ~248k, vision tower, norm) lên float32 -- thêm ~10GB/GPU, đủ
     # làm OOM A100 40GB. Giữ bf16, chỉ bật checkpointing + cho input embeddings nhận grad.
-    for param in model.parameters():
-        param.requires_grad_(False)
-    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-    model.enable_input_require_grads()
+    with dbg_step("freeze + gradient_checkpointing_enable"):
+        for param in model.parameters():
+            param.requires_grad_(False)
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        model.enable_input_require_grads()
 
-    targets = discover_language_lora_targets(model)
+    with dbg_step("discover LoRA targets"):
+        targets = discover_language_lora_targets(model)
     if local_rank == 0:
         suffix_counts: Dict[str, int] = {}
         for n in targets:
@@ -468,7 +591,9 @@ def load_hf_model(args: argparse.Namespace, local_rank: int):
         target_modules=targets,
         use_rslora=args.use_rslora,
     )
-    model = get_peft_model(model, lora_cfg)
+    with dbg_step("get_peft_model"):
+        model = get_peft_model(model, lora_cfg)
+    dbg(f"model sẵn sàng | {cuda_mem()}")
     return model, processor
 
 
@@ -476,6 +601,9 @@ def main() -> None:
     args = parse_args()
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     world_size, local_rank, rank = distributed_info()
+    dbg(f"args: {vars(args)}")
+    dbg(f"torch={torch.__version__} cuda_available={torch.cuda.is_available()} "
+        f"device_count={torch.cuda.device_count() if torch.cuda.is_available() else 0}")
 
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA GPU required")
@@ -490,16 +618,19 @@ def main() -> None:
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     system_prompt_override = load_system_prompt_override(args.system_prompt_file)
 
-    if args.backend == "unsloth":
-        model, processor = load_unsloth_model(args)
-    else:
-        model, processor = load_hf_model(args, local_rank)
+    with dbg_step(f"load model (backend={args.backend})"):
+        if args.backend == "unsloth":
+            model, processor = load_unsloth_model(args)
+        else:
+            model, processor = load_hf_model(args, local_rank)
 
     tokenizer = get_text_tokenizer(processor)
 
-    train_ds = prepare_dataset(args.train_file, tokenizer, args, system_prompt_override)
-    eval_ds = (prepare_dataset(args.eval_file, tokenizer, args, system_prompt_override)
-              if args.eval_file else None)
+    with dbg_step("prepare train dataset"):
+        train_ds = prepare_dataset(args.train_file, tokenizer, args, system_prompt_override)
+    with dbg_step("prepare eval dataset"):
+        eval_ds = (prepare_dataset(args.eval_file, tokenizer, args, system_prompt_override)
+                  if args.eval_file else None)
 
     denom = args.per_device_batch_size * world_size
     grad_accum = max(1, math.ceil(args.global_batch_size / denom))
@@ -548,13 +679,15 @@ def main() -> None:
     collator = CausalLMCollator(pad_token_id=tokenizer.pad_token_id)
     # Unsloth tự vá phần tính loss; chỉ backend hf cần cắt logits về đoạn có nhãn.
     trainer_cls = SuffixLossTrainer if args.backend == "hf" else Trainer
-    trainer = trainer_cls(
-        model=model,
-        args=training_args,
-        train_dataset=train_ds,
-        eval_dataset=eval_ds,
-        data_collator=collator,
-    )
+    with dbg_step(f"tạo {trainer_cls.__name__} (bọc DDP, optimizer)"):
+        trainer = trainer_cls(
+            model=model,
+            args=training_args,
+            train_dataset=train_ds,
+            eval_dataset=eval_ds,
+            data_collator=collator,
+            callbacks=[DebugStepCallback()] if DEBUG else None,
+        )
 
     # Verify exactly where loss is active on one example before spending GPU-hours.
     if rank == 0:
@@ -563,10 +696,12 @@ def main() -> None:
         print("First supervised target preview:")
         print(tokenizer.decode(supervised[:1000], skip_special_tokens=False))
 
-    trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
+    with dbg_step("trainer.train (step đầu gồm cả DDP sync -- treo ở đây thường do NCCL)"):
+        trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
 
     final_dir = str(Path(args.output_dir) / "final_adapter")
-    trainer.save_model(final_dir)
+    with dbg_step(f"save_model -> {final_dir}"):
+        trainer.save_model(final_dir)
     if trainer.is_world_process_zero():
         try:
             processor.save_pretrained(final_dir)
