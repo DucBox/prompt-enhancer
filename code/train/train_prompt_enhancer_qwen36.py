@@ -34,6 +34,7 @@ import math
 import os
 import random
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -181,14 +182,19 @@ def build_messages(system_prompt: str, user_prompt: str, target_json: str,
 
 def _as_ids(x: Any) -> List[int]:
     # tokenizer.apply_chat_template(tokenize=True) normally returns List[int].
-    # Handle tensor/dict variants defensively.
-    if isinstance(x, dict):
+    # Newer transformers return a BatchEncoding (a UserDict, NOT a dict subclass):
+    # list() on it yields the KEY NAMES ("input_ids", "attention_mask"), which silently
+    # passes the prefix check and crashes later in the collator. Handle any mapping.
+    if isinstance(x, Mapping) or hasattr(x, "keys"):
         x = x["input_ids"]
     if isinstance(x, torch.Tensor):
         x = x.tolist()
-    if x and isinstance(x[0], list):
+    if x and isinstance(x[0], (list, tuple)):
         x = x[0]
-    return list(x)
+    ids = list(x)
+    if not all(isinstance(i, int) for i in ids):
+        raise TypeError(f"apply_chat_template returned non-token ids: {type(x).__name__} {ids[:3]}")
+    return ids
 
 
 def encode_record(ex: Dict[str, Any], tokenizer, args: argparse.Namespace,
