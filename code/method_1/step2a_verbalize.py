@@ -117,6 +117,15 @@ def build_spec(sub: Dict[str, Any], persona: Dict[str, str]) -> Dict[str, Any]:
     return spec
 
 
+SPEC_CONTENT_KEYS = ("chu_de_chinh", "groups", "boi_canh", "phong_cach")
+
+
+def spec_content(spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Phần NỘI DUNG của bản mô tả 2a (bỏ persona/mức/độ dài) -- đưa nguyên cho judge 2b để
+    judge thấy mệnh đề theo đúng nhóm như 2a đã thấy ("số lượng: 3" thuộc nhóm nào)."""
+    return {key: spec[key] for key in SPEC_CONTENT_KEYS if key in spec}
+
+
 def clean_prompt_text(text: str) -> str:
     """Gỡ ngoặc kép bao ngoài và gộp xuống dòng — model hay trả về dạng đó."""
     s = " ".join(str(text).split())
@@ -214,6 +223,7 @@ def main() -> None:
             "user_prompt": item["user_prompt"],
             "n_words": item["n_words"],
             "checklist": sub["checklist"],
+            "menh_de_theo_nhom": spec_content(specs[key_of(sub)]),
             "required_facts": sub.get("required_facts") or [],
         })
 

@@ -669,6 +669,21 @@ class TestSubJsonSelection(unittest.TestCase):
             given += spec.get("boi_canh", []) + spec.get("phong_cach", [])
             self.assertEqual(subjson._dedupe(given), sub["checklist"], level)
 
+    def test_judge_groups_carry_exactly_the_checklist(self):
+        """Judge 2b nhận mệnh đề theo nhóm (spec_content) -- phải đúng các mệnh đề của checklist,
+        không thiếu không thừa, và không lộ persona/mức cho judge."""
+        persona = {"vai": "v", "giọng": "g", "ngôn ngữ": "n"}
+        for level in subjson.LEVELS:
+            sub = self.assemble(level)
+            content = s2a.spec_content(s2a.build_spec(sub, persona))
+            given = list(content.get("chu_de_chinh", []))
+            given += [f for g in content["groups"] for f in g["facts"]]
+            given += content.get("boi_canh", []) + content.get("phong_cach", [])
+            self.assertEqual(subjson._dedupe(given), sub["checklist"], level)
+            self.assertLessEqual(set(content), set(s2a.SPEC_CONTENT_KEYS))
+        groups = s2a.spec_content(s2a.build_spec(self.assemble("short"), persona))["groups"]
+        self.assertIn("số lượng: 3", groups[0]["facts"])   # số lượng nằm trong đúng nhóm của nó
+
     def test_cultural_name_is_checklist_item_but_label_is_not(self):
         checklist = self.assemble("long")["checklist"]
         self.assertIn("Lăng Bác", checklist)
@@ -1176,6 +1191,28 @@ class TestPrompts(unittest.TestCase):
         messages = prompts.build_step2b_messages(["áo dài đỏ"], "ảnh áo dài")
         self.assertIn("áo dài đỏ", messages[-1]["content"])
         self.assertIn("ảnh áo dài", messages[-1]["content"])
+
+    def test_step2b_messages_use_groups_when_given(self):
+        grouped = {"chu_de_chinh": ["ao sen"],
+                   "groups": [{"facts": ["người phụ nữ", "số lượng: 3"]},
+                              {"facts": ["hoa sen", "nhiều bông"], "so_nhieu": True}]}
+        payload = json.loads(prompts.build_step2b_messages(["x"], "p", grouped)[-1]["content"])
+        self.assertEqual(payload["menh_de_theo_nhom"], grouped)
+        self.assertNotIn("menh_de_cho_phep", payload)
+
+    def test_step2b_messages_fall_back_to_flat_list_for_old_rows(self):
+        payload = json.loads(prompts.build_step2b_messages(["áo dài đỏ"], "p", None)[-1]["content"])
+        self.assertEqual(payload["menh_de_cho_phep"], ["áo dài đỏ"])
+        self.assertNotIn("menh_de_theo_nhom", payload)
+
+    def test_step2b_count_fact_belongs_to_its_own_group(self):
+        """sen_001966: checklist phẳng đặt "số lượng: 3" ngay sau mệnh đề hoa sen -> judge loại
+        oan prompt "Ba người phụ nữ...". Số lượng phải được chấm theo đúng nhóm chứa nó."""
+        text = prompts.STEP2B_SYSTEM
+        self.assertIn("số lượng: N", text)
+        self.assertIn("CHÍNH NHÓM chứa nó", text)
+        self.assertIn("ba người phụ nữ", text)
+        self.assertIn("MỆNH ĐỀ THUỘC VỀ NHÓM CỦA NÓ", text)
 
     def test_step2b_tolerates_missing_subject_repeat_in_position_facts(self):
         """Chốt chặn cho hướng dẫn khoan dung: mệnh đề vị trí lặp tên chủ thể

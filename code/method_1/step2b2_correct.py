@@ -98,7 +98,8 @@ def main() -> None:
             if not corrected:
                 raise llm.LLMError("model trả về chuỗi rỗng khi sửa")
 
-            judge_messages = prompts.build_step2b_messages(row["checklist"], corrected)
+            judge_messages = prompts.build_step2b_messages(
+                row["checklist"], corrected, row.get("menh_de_theo_nhom"))
             verdict = judge.chat_json(
                 judge_messages, temperature=0.0, max_tokens=args.max_tokens,
             )

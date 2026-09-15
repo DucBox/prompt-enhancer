@@ -526,7 +526,13 @@ def build_step2a_messages(spec: Dict[str, Any]) -> List[Dict[str, str]]:
 # =============================================================================
 
 STEP2B_SYSTEM = r"""Bạn là bộ kiểm duyệt dữ liệu huấn luyện. Bạn nhận:
-  1. Một danh sách MỆNH ĐỀ mà câu prompt được phép nói (và phải nói).
+  1. Các MỆNH ĐỀ mà câu prompt được phép nói (và phải nói), xếp THEO NHÓM trong
+     "menh_de_theo_nhom":
+       - "chu_de_chinh": bức ảnh VỀ CÁI GÌ;
+       - "groups": mỗi phần tử là các mệnh đề về MỘT thứ trong ảnh (một vật, một người, hay
+         một nhóm cùng loại). "so_nhieu": true nghĩa là thứ đó có nhiều cái nhưng không nêu số;
+       - "boi_canh": bối cảnh;  "phong_cach": góc chụp, ánh sáng, phong cách, loại ảnh.
+     (Dữ liệu cũ có thể chỉ là một danh sách phẳng "menh_de_cho_phep".)
   2. Một câu prompt do người khác viết.
 
 Hãy kiểm tra hai điều:
@@ -548,6 +554,16 @@ tiếng Anh hoặc thay bằng một khái niệm khác (ví dụ "áo dài" →
 → "shaman") thì tính là THIẾU mệnh đề đó — đây là lỗi cần bắt được. Các mệnh đề còn lại
 (màu sắc, ánh sáng, vị trí, hành động, bối cảnh...) không bị ràng buộc ngôn ngữ.
 
+MỆNH ĐỀ THUỘC VỀ NHÓM CỦA NÓ: một mệnh đề trong "groups" chỉ nói về thứ của CHÍNH nhóm đó. Màu,
+chất liệu, hành động của nhóm này nhắc cho thứ khác trong prompt thì KHÔNG tính là đã nhắc.
+
+MỆNH ĐỀ SỐ LƯỢNG: "số lượng: N" là số cá thể của CHÍNH NHÓM chứa nó, không phải của nhóm khác.
+  - Nhóm có "người phụ nữ" và "số lượng: 3", prompt viết "ba người phụ nữ" hoặc "3 người phụ nữ"
+    → ĐÃ nhắc tới.
+  - Prompt nêu số khác, hoặc chỉ nói mơ hồ ("mấy", "vài", "nhiều") cho nhóm đó → THIẾU.
+  - Nhóm "so_nhieu": true mà prompt nói mơ hồ ("mấy chiếc thuyền") là ĐÚNG; prompt tự đặt ra một
+    con số cụ thể cho nhóm đó → tính là THÊM.
+
 MỆNH ĐỀ VỊ TRÍ CÓ LẶP TÊN CHỦ THỂ: một số mệnh đề vị trí lặp lại tên chủ thể/nhóm ở cuối câu,
 ví dụ "ở tai phải thanh đồng", "cầm ở tay trái thanh đồng". Một prompt viết tự nhiên KHÔNG lặp
 lại tên chủ thể cho từng chi tiết như vậy (chỉ nhắc ngầm qua ngữ cảnh đã thiết lập) —
@@ -559,8 +575,8 @@ Nhưng phần vị trí CỤ THỂ vẫn phải đúng — trái/phải, tay/tai
   - Mệnh đề "ở tai phải thanh đồng", prompt không nhắc bên nào cả → THIẾU.
 
 Chỉ trả về đúng một JSON object, không giải thích.
-Mỗi phần tử trong "missing" phải CHÉP NGUYÊN VĂN một mệnh đề trong danh sách được cho — không
-diễn đạt lại, không gộp, không tóm tắt:
+Mỗi phần tử trong "missing" phải CHÉP NGUYÊN VĂN một mệnh đề được cho (chỉ chuỗi mệnh đề, không
+kèm tên nhóm) — không diễn đạt lại, không gộp, không tóm tắt:
 {
   "missing": ["mệnh đề bị thiếu"],
   "extra": ["thông tin bị thêm"],
@@ -569,8 +585,15 @@ diễn đạt lại, không gộp, không tóm tắt:
 verdict là "pass" khi missing rỗng và extra rỗng. Ngược lại là "fail"."""
 
 
-def build_step2b_messages(facts: List[str], prompt_text: str) -> List[Dict[str, str]]:
-    payload = {"menh_de_cho_phep": facts, "prompt": prompt_text}
+def build_step2b_messages(
+    facts: List[str], prompt_text: str, grouped: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, str]]:
+    """`grouped` là mệnh đề theo nhóm (step2a_verbalize.spec_content) -- có thì judge chấm theo
+    nhóm; dòng cũ không có thì rơi về danh sách phẳng `facts`."""
+    if grouped:
+        payload: Dict[str, Any] = {"menh_de_theo_nhom": grouped, "prompt": prompt_text}
+    else:
+        payload = {"menh_de_cho_phep": facts, "prompt": prompt_text}
     return [
         {"role": "system", "content": STEP2B_SYSTEM},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)},

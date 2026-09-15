@@ -125,7 +125,8 @@ def main() -> None:
 
     if args.dry_run:
         row = rows[0]
-        messages = prompts.build_step2b_messages(row["checklist"], row["user_prompt"])
+        messages = prompts.build_step2b_messages(
+            row["checklist"], row["user_prompt"], row.get("menh_de_theo_nhom"))
         print("\n[DRY RUN] {} messages cho {}".format(len(messages), key_of(row)))
         print("\n--- system ---\n{}".format(messages[0]["content"][:800]))
         print("\n--- user ---\n{}".format(messages[-1]["content"][:800]))
@@ -156,7 +157,8 @@ def main() -> None:
         print("model    : {}\n".format(client.model))
 
         def process(row: Dict[str, Any]) -> Optional[str]:
-            messages = prompts.build_step2b_messages(row["checklist"], row["user_prompt"])
+            messages = prompts.build_step2b_messages(
+                row["checklist"], row["user_prompt"], row.get("menh_de_theo_nhom"))
             verdict = client.chat_json(
                 messages, temperature=args.temperature, max_tokens=args.max_tokens,
             )

@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>Prompt Enhancer — Kế hoạch triển khai v2</title>
+<style>
+  @page { size: A4; margin: 16mm 14mm 14mm 14mm; }
+
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 10.2pt; line-height: 1.5; color: #1a1d21; margin: 0;
+  }
+  code, pre { font-family: "SF Mono", Menlo, Consolas, monospace; }
+
+  h1 { font-size: 21pt; margin: 0 0 2mm; letter-spacing: -0.4px; }
+  .sub { color: #5b636e; font-size: 10pt; margin: 0 0 7mm; }
+
+  h2 {
+    font-size: 13pt; margin: 0 0 3mm; padding-bottom: 1.8mm;
+    border-bottom: 2px solid #1a1d21;
+  }
+  h3 { font-size: 10.6pt; margin: 5mm 0 2mm; }
+
+  .step { margin-bottom: 7mm; }
+  .step-head {
+    display: flex; align-items: baseline; gap: 3mm;
+    border-bottom: 1.5px solid #1a1d21; padding-bottom: 1.8mm; margin-bottom: 3mm;
+    page-break-after: avoid; break-after: avoid; page-break-inside: avoid;
+  }
+  .io, pre, table, h3 { page-break-inside: avoid; }
+  .num {
+    font-size: 15pt; font-weight: 700; color: #b8341f;
+    min-width: 13mm; letter-spacing: -0.5px;
+  }
+  .step-title { font-size: 12.5pt; font-weight: 700; }
+  .step-note { margin-left: auto; font-size: 8.6pt; color: #6b7280; font-style: italic; }
+
+  .io { display: flex; gap: 4mm; margin: 3mm 0; }
+  .io > div {
+    flex: 1; border: 1px solid #d4d8dd; border-radius: 3px;
+    padding: 2.5mm 3mm; background: #fbfcfd;
+  }
+  .io .lbl {
+    font-size: 7.6pt; font-weight: 700; letter-spacing: 0.9px;
+    text-transform: uppercase; color: #6b7280; margin-bottom: 1.5mm;
+  }
+  .io .in  { border-left: 3px solid #7a8694; }
+  .io .out { border-left: 3px solid #b8341f; }
+  .io ul { margin: 0; padding-left: 4.5mm; }
+  .io li { margin-bottom: 0.8mm; }
+
+  pre {
+    background: #f4f6f8; border: 1px solid #e0e4e9; border-radius: 3px;
+    padding: 2.5mm 3mm; font-size: 8.4pt; line-height: 1.45;
+    overflow-x: auto; white-space: pre-wrap; margin: 2mm 0;
+  }
+  .ex-lbl {
+    font-size: 8.4pt; font-weight: 700; color: #b8341f;
+    text-transform: uppercase; letter-spacing: 0.6px; margin-top: 3mm;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 9.2pt; margin: 2.5mm 0; }
+  th {
+    text-align: left; background: #1a1d21; color: #fff;
+    padding: 1.8mm 2.5mm; font-size: 8.6pt; letter-spacing: 0.3px;
+  }
+  td { padding: 1.8mm 2.5mm; border-bottom: 1px solid #e0e4e9; vertical-align: top; }
+  tr:nth-child(even) td { background: #fafbfc; }
+
+  .callout {
+    border-left: 3px solid #b8341f; background: #fdf5f3;
+    padding: 3mm 3.5mm; margin: 3.5mm 0; page-break-inside: avoid;
+  }
+  .callout .t { font-weight: 700; margin-bottom: 1.5mm; }
+
+  .flow {
+    background: #f4f6f8; border: 1px solid #e0e4e9; border-radius: 3px;
+    padding: 4mm; font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 8.6pt; line-height: 1.62; margin: 4mm 0; white-space: pre;
+    page-break-inside: avoid;
+  }
+  .keep { page-break-inside: avoid; break-inside: avoid; }
+  .new { color: #b8341f; font-weight: 700; }
+  .muted { color: #6b7280; }
+  strong.k { color: #b8341f; }
+  footer { margin-top: 8mm; padding-top: 2.5mm; border-top: 1px solid #d4d8dd;
+           font-size: 8.4pt; color: #6b7280; }
+</style>
+</head>
+<body>
+
+<h1>Prompt Enhancer — Kế hoạch triển khai v2</h1>
+<p class="sub">
+  Áp dụng cho luồng hiện tại (sau commit <code>657d205</code>): chủ đề chính rút từ
+  <code>high_level_description</code>, bảng thuật ngữ chủ đề chỉ làm gợi ý, system prompt train viết lại.
+  Bản trước (<code>plan.pdf</code>) mô tả luồng <strong>exp1</strong> — chủ thể bắt buộc rút từ tên file.
+</p>
+
+<h2>Vì sao có bản v2</h2>
+
+<p>
+Mục tiêu không đổi: <strong>user prompt → JSON caption chi tiết</strong> cho Ideogram 4, dữ liệu sinh
+ngược từ ~28k caption ảnh thật (<span class="muted">JSON → prompt</span>) rồi train xuôi
+(<span class="muted">prompt → JSON</span>). Thay đổi nằm ở cách xác định <strong>ảnh này về cái gì</strong>.
+</p>
+
+<p>
+exp1 (tag <code>exp1</code>, commit <code>cc85c6a</code>) lấy chủ thể bắt buộc bằng cách khớp
+<em>toàn bộ</em> từ khoá tên file với tên một nhóm của 1a. Audit bộ <code>test_5_new</code> (200 ảnh →
+573 dòng train) cho thấy cách này hỏng theo hai hướng:
+</p>
+
+<table>
+  <tr><th style="width:52mm">Vấn đề</th><th>Bằng chứng trên test_5_new</th></tr>
+  <tr><td><strong>Khớp tên file 100% hay trượt</strong> → cổng chặn tắt ngầm</td>
+      <td>131/573 dòng (45 ảnh) có <code>required_subject = None</code>. Tên file thừa chữ
+          (<code>banh_mi_viet_nam</code> — nhóm chỉ tên "bánh mì"), bị cắt
+          (<code>trung_tam_thanh_pho_ho_chi_min</code>), hoặc diễn đạt khác
+          (<code>ao_yem_truyen_thong</code>).</td></tr>
+  <tr><td><strong>Lệch chủ đề ở ảnh hoạt động / cảnh</strong></td>
+      <td><code>lang_gom_bat_trang_nghe_nhan_001310</code>: HLD tả <em>"four people gathered around a
+          pottery wheel … making pottery"</em>, nhưng 1a gom người thành nhóm chính nên prompt short ra
+          <em>"một bức ảnh có vài người, gồm một cô gái nhỏ, một người đàn ông…"</em> — mất hẳn "làm gốm".</td></tr>
+  <tr><td><strong>Thuật ngữ văn hoá rơi mất mà vẫn qua judge</strong></td>
+      <td>37 dòng target có thuật ngữ nhưng prompt không có. Vd 1b chọn "mặc trang phục truyền thống"
+          thay vì "áo ngũ thân"; judge chỉ so với checklist nên không bắt được.</td></tr>
+</table>
+
+<div class="callout">
+  <div class="t">Ý tưởng v2: bám theo nội dung ảnh, tên file chỉ để tham khảo</div>
+  Chủ đề chính phải là thứ <code>high_level_description</code> nói bức ảnh <strong>về cái gì</strong> —
+  có thể là một hoạt động ("nhóm người làm gốm"), một khung cảnh ("chợ đường phố Sài Gòn") chứ không
+  chỉ là một vật. Tên thư mục và bảng thuật ngữ chỉ giúp <strong>gọi tên cho đúng</strong> ("ceramic
+  teapot" → "ấm tích"); ảnh không thể hiện chủ đề gợi ý thì bỏ qua gợi ý. Chủ đề được code chèn vào
+  mọi mức và là cổng chặn cứng ở 2b.
+</div>
+
+<div class="keep">
+<h3>Thay đổi so với v1</h3>
+<table>
+  <tr><th style="width:18mm">Bước</th><th style="width:62mm">v1 (exp1)</th><th>v2 (hiện tại)</th></tr>
+  <tr><td>1a</td><td>Phân rã element / background / style; HLD chỉ làm ngữ cảnh</td>
+      <td><span class="new">+ <code>chu_de_chinh</code></span> (1–3 mệnh đề, ≤ 10 từ) rút từ HLD, có
+          <span class="new">gợi ý chủ đề</span> từ tên thư mục + <code>topic_terms.json</code>;
+          <code>khop_goi_y</code> ghi ảnh có thể hiện gợi ý không</td></tr>
+  <tr><td>1b</td><td>Nhóm khớp tên file phải có ở cả 3 mức</td>
+      <td>Code <strong>tự chèn</strong> chủ đề vào cả 3 mức, không tính vào trần từ; short được không
+          chọn thêm nhóm nào</td></tr>
+  <tr><td>2a</td><td>Nhận groups / bối cảnh / phong cách</td>
+      <td><span class="new">+ <code>chu_de_chinh</code></span> là ý chính, không được lấn át; thêm
+          few-shot "làm gốm"</td></tr>
+  <tr><td>2b / 2b2</td><td><code>required_subject</code> (1 chuỗi, có thể None)</td>
+      <td><code>required_facts</code> = mọi mệnh đề chủ đề; judge nhận mệnh đề <strong>theo nhóm</strong> và phải chép nguyên văn mệnh đề thiếu;
+          nhãn thống kê lý do loại được sửa</td></tr>
+  <tr><td>4</td><td>System prompt train ~410 từ, khá thô</td>
+      <td>Viết lại theo phân phối nhãn Y thật (~950–1060 từ); import unsloth trước transformers;
+          backend <code>hf</code> tự thử thêm <code>AutoModelForImageTextToText</code></td></tr>
+</table>
+</div>
+
+<div class="flow">Toàn bộ pipeline v2
+
+  28k target_json          topic_terms.json (84 slug → thuật ngữ có dấu + đồng nghĩa)
+        │                          │
+        ├─▶ [0]   Chuẩn hoá + audit ─────────────▶ target_json sạch, element có id (nội bộ)
+        │                          │
+        ├─▶ [1a]  LLM phân rã + <span class="new">CHỦ ĐỀ CHÍNH</span> ◀──┘ gợi ý (chỉ tham khảo)
+        │                                        ▶ chu_de_chinh + mệnh đề đã xếp hạng   (cache)
+        │
+        ├─▶ [1b]  LLM chọn lọc 3 mức ────────────▶ sub_json = <span class="new">chủ đề (code chèn)</span> + phần chọn thêm
+        │
+        ├─▶ [2a]  LLM verbalize ─────────────────▶ user_prompt (chủ đề là ý chính)
+        │
+        ├─▶ [2b]  LLM judge ─────────────────────▶ loại thêm/thiếu; <span class="new">thiếu chủ đề → loại ngay</span>
+        │
+        ├─▶ [2b2] LLM sửa 1 lần  (tuỳ chọn) ────▶ cứu lại prompt bị loại
+        │
+        ├─▶ [2c]  Chia tập theo id ──────────────▶ train / val / test
+        │
+        ├─▶ [2d]  Chuẩn hoá nhãn Y ──────────────▶ bóc id, khoá thứ tự key Ideogram 4
+        │
+        ├─▶ [3]   Bộ đánh giá + baseline ────────▶ thước đo (làm TRƯỚC khi train)
+        │
+        ├─▶ [4]   Huấn luyện SFT ────────────────▶ LoRA adapter (system prompt riêng theo mức)
+        │
+        └─▶ [5]   Đánh giá ──────────────────────▶ báo cáo</div>
+
+<div class="callout">
+  <div class="t">Các khái niệm dùng xuyên suốt</div>
+  <table style="margin:0">
+    <tr><td style="width:30mm"><code>target_json</code></td>
+        <td>Caption gốc đầy đủ. <strong class="k">Luôn là nhãn Y</strong> cho cả 3 mức prompt.</td></tr>
+    <tr><td><code>chu_de_chinh</code></td>
+        <td>1–3 mệnh đề tiếng Việt nói bức ảnh về cái gì, rút từ HLD. Bắt buộc có trong mọi prompt.</td></tr>
+    <tr><td><code>goi_y_chu_de</code></td>
+        <td>Tên thư mục + <code>thuat_ngu</code> + <code>dong_nghia</code> từ bảng chủ đề. Chỉ là gợi ý cách gọi tên.</td></tr>
+    <tr><td><code>sub_json</code></td>
+        <td>Phần user "được biết": chủ đề chính + mệnh đề 1b chọn. Dùng để sinh prompt và làm checklist.
+            Không bao giờ là nhãn Y.</td></tr>
+    <tr><td><code>persona</code></td>
+        <td>Vai, giọng, ngôn ngữ người viết. Chỉ đổi văn phong, không đổi nội dung.</td></tr>
+  </table>
+</div>
+
+<h2 style="margin-top:7mm">Chi tiết từng bước</h2>
+
+<!-- ---------- STEP 0 ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">0</span>
+    <span class="step-title">Chuẩn hoá &amp; kiểm định dữ liệu gốc</span>
+    <span class="step-note">code thuần · không đổi so với v1</span>
+  </div>
+  <p>Bỏ <code>bbox</code>, <code>color_palette</code>; kiểm tra schema (<code>photo</code> hoặc
+  <code>art_style</code>, không cả hai); khoá thứ tự key; gán <code>id</code> nội bộ cho element; thống kê
+  phân phối. Trên test_5_new: 200/200 file hợp lệ, 1.485 element, chỉ 6 element <code>text</code>;
+  desc p50 18 từ, HLD p50 28 từ.</p>
+</div>
+
+<!-- ---------- STEP 1a ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">1a</span>
+    <span class="step-title">LLM rút chủ đề chính, gom nhóm &amp; phân rã mọi trường</span>
+    <span class="step-note">LLM · temperature 0 · cache</span>
+  </div>
+
+  <div class="io">
+    <div class="in">
+      <div class="lbl">Đầu vào</div>
+      <ul><li>1 <code>target_json</code></li>
+          <li><span class="new">Gợi ý chủ đề</span>: tên thư mục + thuật ngữ + đồng nghĩa</li></ul>
+    </div>
+    <div class="out">
+      <div class="lbl">Đầu ra</div>
+      <ul><li><span class="new"><code>chu_de_chinh</code>, <code>khop_goi_y</code></span></li>
+          <li><code>concept_groups</code>, <code>facts</code>, <code>background_facts</code>, <code>style_facts</code></li>
+          <li><code>goi_y_chu_de</code> đã dùng (để kiểm tra cache)</li></ul>
+    </div>
+  </div>
+
+  <h3>Phần mới: chủ đề chính</h3>
+  <table>
+    <tr><th style="width:44mm">Luật</th><th>Chi tiết</th></tr>
+    <tr><td>Bám HLD, không bám element</td>
+        <td>Không lấy nhóm có nhiều người/vật nhất hay được tả dài nhất. Chủ đề là hoạt động, sự kiện
+            hay khung cảnh thì nêu đúng hoạt động/khung cảnh đó.</td></tr>
+    <tr><td>Chỉ ý cốt lõi</td>
+        <td>1–3 mệnh đề, tổng ≤ 10 từ. Không màu sắc, chất liệu, ánh sáng, góc máy — trừ khi chính nó
+            làm nên chủ đề ("tranh khắc gỗ").</td></tr>
+    <tr><td>Gợi ý chỉ để gọi tên</td>
+        <td>Ảnh thể hiện chủ đề gợi ý (kể cả mô tả gốc viết tiếng Anh) → gọi bằng thuật ngữ/đồng nghĩa,
+            <code>khop_goi_y: true</code>. Mô tả gốc gọi cụ thể hơn mà vẫn đúng → theo mô tả gốc.
+            Ảnh không thể hiện → bỏ qua gợi ý, <code>khop_goi_y: false</code>.</td></tr>
+    <tr><td>Không đưa <code>lien_quan</code></td>
+        <td>Các tên như "Bát Tràng", "Nhật Tân" chỉ đúng với một phần ảnh của chủ đề (Bát Tràng 0/4 ảnh
+            ở tập 1k) — đưa vào gợi ý dễ bị 1a chèn địa danh mà mô tả gốc không có.</td></tr>
+  </table>
+
+  <div class="keep">
+  <div class="ex-lbl">Ví dụ — gợi ý và chủ đề mong đợi</div>
+<pre>lang_gom_bat_trang_nghe_nhan_001310
+  gợi ý : {"ten_thu_muc": "lang gom bat trang nghe nhan", "thuat_ngu": "làm gốm",
+           "dong_nghia": ["thợ gốm", "nghệ nhân gốm", "xưởng gốm"]}
+  HLD   : "A group of four people … gathered around a pottery wheel … making pottery"
+  → chu_de_chinh ["nhóm người làm gốm", "quanh bàn xoay gốm"], khop_goi_y true
+    (v1: nhóm chính "nhóm người làm gốm" nhưng short chỉ còn "người phụ nữ · cô gái nhỏ · người đàn ông")
+
+trung_tam_thanh_pho_ho_chi_min_001534
+  gợi ý : {"thuat_ngu": "Thành phố Hồ Chí Minh", "dong_nghia": ["Sài Gòn", "TP.HCM"]}
+  HLD   : "A high-angle daytime photograph of a bustling street market in Ho Chi Minh City …"
+  → chu_de_chinh ["chợ đường phố Sài Gòn"]        ← gọi theo mô tả gốc, cụ thể hơn gợi ý</pre>
+  </div>
+
+  <h3>Bảng thuật ngữ chủ đề — <code>common/topic_terms.json</code></h3>
+  <p>84 slug, 81 chủ đề (3 cặp slug trùng nghĩa). Mỗi mục có <code>thuat_ngu</code> (đúng chính tả JSON
+  gốc dùng), <code>dong_nghia</code>, <code>lien_quan</code>, <code>loai</code>, số file trên tập full và
+  tỉ lệ JSON gốc có thuật ngữ trên tập 1k. Slug không có trong bảng thì gợi ý chỉ còn tên thư mục. Sửa
+  bảng thì cache 1a của đúng các ảnh có gợi ý thay đổi tự bị gọi lại.</p>
+
+  <p><span class="muted">Phần phân rã giữ nguyên v1: mỗi mệnh đề một ý, 2–6 từ, tiếng Việt; tách theo
+  nghĩa, không theo dấu câu; xếp hạng trong từng trường, dùng toàn bộ JSON làm ngữ cảnh; không bỏ ý nào.
+  Code kiểm tra: đủ facts cho mọi element, đúng các trường style, chủ đề 1–3 mệnh đề và ≤ 10 từ. 1a
+  không có vòng sửa lỗi — vi phạm thì ảnh vào <code>failures.json</code>.</span></p>
+</div>
+
+<!-- ---------- STEP 1b ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">1b</span>
+    <span class="step-title">LLM chọn lọc <code>sub_json</code> cho short / medium / long</span>
+    <span class="step-note">LLM · 1 lần gọi cho cả 3 mức · cache</span>
+  </div>
+
+  <div class="io">
+    <div class="in">
+      <div class="lbl">Đầu vào</div>
+      <ul><li>Bản phân rã của 1a, sắp lại theo nhóm</li>
+          <li><code>chu_de_chinh</code> (chỉ để biết, không chọn lại)</li></ul>
+    </div>
+    <div class="out">
+      <div class="lbl">Đầu ra</div>
+      <ul><li>3 <code>sub_json</code>: chủ đề + phần chọn thêm, lồng nhau short ⊆ medium ⊆ long</li>
+          <li><code>required_facts</code> = chủ đề chính</li></ul>
+    </div>
+  </div>
+
+  <h3>Định nghĩa ba mức — theo nội dung, không theo số từ</h3>
+  <table>
+    <tr><th style="width:18mm">Mức</th><th>Độ phủ</th><th style="width:40mm">Độ sâu</th><th>Loại thông tin</th>
+        <th style="width:24mm">Trần (không tính chủ đề)</th></tr>
+    <tr><td><strong>short</strong></td>
+        <td>Chủ đề chính; được thêm nhóm chủ thể chính nếu làm rõ chủ đề, hoặc để trống</td>
+        <td>Tối đa 2 ý: thuộc tính nổi bật, <em>hoặc</em> 1 địa điểm có bản sắc</td>
+        <td>Không bối cảnh chung chung, không style</td>
+        <td>16 từ (chấp nhận 20)</td></tr>
+    <tr><td><strong>medium</strong></td>
+        <td>+ 1–3 nhóm phụ quan trọng + bối cảnh chính</td>
+        <td>Chủ thể 2–4 thuộc tính; nhóm phụ 1–2</td>
+        <td>Tối đa 1 ý style, chỉ khi đáng chú ý</td>
+        <td>50 từ (chấp nhận 55)</td></tr>
+    <tr><td><strong>long</strong></td>
+        <td>Gần như toàn bộ ảnh</td>
+        <td>Thuộc tính sâu, vị trí, hành động</td>
+        <td>+ bối cảnh chi tiết, ánh sáng, góc máy, phong cách</td>
+        <td>—</td></tr>
+  </table>
+
+  <div class="keep">
+  <h3>Code chèn chủ đề, LLM chọn phần còn lại</h3>
+  <table>
+    <tr><th style="width:44mm">Cơ chế</th><th>Vì sao</th></tr>
+    <tr><td>Chủ đề tự vào cả 3 mức</td>
+        <td>LLM của 1b không chọn nên không làm mất được — bịt đúng lỗi "short chỉ liệt kê người".</td></tr>
+    <tr><td>Không tính vào trần từ và số ý</td>
+        <td>LLM không bỏ được chủ đề; tính vào trần thì 1b rơi vào vòng sửa lỗi không thể thoả.</td></tr>
+    <tr><td>Luật chọn số 5</td>
+        <td>Mọi thứ chọn thêm phải phục vụ chủ đề; ưu tiên ý làm rõ chủ đề (hoạt động, địa điểm có bản
+            sắc, vật đặc trưng) hơn chi tiết lẻ về từng người/vật.</td></tr>
+    <tr><td>Checklist = chủ đề + phần chọn</td>
+        <td>Chủ đề đứng đầu; mệnh đề trùng chủ đề (vd tên nhóm văn hoá) chỉ tính một lần.</td></tr>
+  </table>
+  </div>
+  <p><span class="muted">Giữ nguyên v1: chép nguyên văn, lồng nhau, định nghĩa short; sai thì gọi lại kèm
+  danh sách lỗi (tối đa 2 lần); hết lượt thì chỉ bỏ mức hỏng (<code>partial.json</code>); cache theo dấu
+  vân tay đầu vào + system prompt.</span></p>
+
+  <div class="ex-lbl">Ví dụ — few-shot 1b trên ảnh chợ nổi Cái Răng</div>
+<pre>chu_de_chinh  chợ nổi Cái Răng                        ← code chèn vào cả 3 mức
+
+short    chiếc thuyền · bằng gỗ
+medium   + số lượng: 2 · màu tím · là quán ăn nổi · màu xanh
+         + đội nón lá · đang nấu đồ ăn · mặt sông · nước nâu đục · chụp từ trên không
+long     + dài · nằm ngang giữa khung hình · … · ánh sáng ban ngày · sống động
+(nhóm "chợ nổi Cái Răng" không chọn lại vì trùng chủ đề)</pre>
+</div>
+
+<!-- ---------- STEP 2a ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">2a</span>
+    <span class="step-title">Sinh user prompt</span>
+    <span class="step-note">LLM · temperature 0.9</span>
+  </div>
+
+  <p>Bản mô tả đưa cho model có thêm <code>chu_de_chinh</code>, đứng trước <code>groups</code>,
+  <code>boi_canh</code>, <code>phong_cach</code> — vẫn đúng các mệnh đề trong checklist, không hơn.</p>
+
+<pre>BẮT BUỘC (phần thêm ở v2)
+- "chu_de_chinh" là ý chính: đọc câu yêu cầu phải hiểu ngay bức ảnh về cái gì (thường nói từ đầu).
+  Các mệnh đề khác chỉ bổ sung, KHÔNG được lấn át — ảnh "nhóm người làm gốm" mà câu yêu cầu
+  chỉ nói "hai phụ nữ và một người đàn ông" là SAI.
+- PHẢI nhắc ĐẦY ĐỦ mọi mệnh đề — trong chu_de_chinh, groups, boi_canh và phong_cach.</pre>
+
+  <div class="ex-lbl">Few-shot mới — chủ đề là hoạt động</div>
+<pre>chu_de_chinh ["nhóm người làm gốm", "quanh bàn xoay gốm"]   groups [["cô gái nhỏ"]]
+→ "Muốn có tấm ảnh một nhóm người đang làm gốm quanh bàn xoay gốm, trong nhóm có một cô gái nhỏ."</pre>
+
+  <p><span class="muted">Giữ nguyên v1: cấm liệt kê từng vật, cấm ngôn ngữ khung hình, cấm văn dịch; persona
+  60% user phổ thông, 80% tiếng Việt / 20% tiếng Anh giữ thuật ngữ Việt; mọi prompt viết đúng chính tả
+  (lỗi chính tả thuộc mô-đun correction riêng).</span></p>
+</div>
+
+<!-- ---------- STEP 2b ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">2b</span>
+    <span class="step-title">Lọc chất lượng</span>
+    <span class="step-note">LLM khác họ</span>
+  </div>
+  <div class="keep">
+  <p>Chấm hai điều như v1: <em>THIẾU</em> mệnh đề nào trong checklist, <em>THÊM</em> thông tin nào ngoài
+  checklist. Thuật ngữ văn hoá bị dịch sang tiếng Anh vẫn tính là thiếu.</p>
+  <table>
+    <tr><th style="width:44mm">Thay đổi v2</th><th>Chi tiết</th></tr>
+    <tr><td>Cổng chủ đề chính</td>
+        <td>Judge báo thiếu <strong>bất kỳ</strong> mệnh đề nào trong <code>required_facts</code> → loại
+            ngay, không phụ thuộc <code>--max_missing</code>. Dòng cũ chỉ có <code>required_subject</code>
+            vẫn đọc được.</td></tr>
+    <tr><td>Mệnh đề theo nhóm</td>
+        <td>Judge nhận <code>menh_de_theo_nhom</code> — đúng cấu trúc 2a đã thấy (chủ đề, từng nhóm kèm
+            <code>so_nhieu</code>, bối cảnh, phong cách) thay cho danh sách phẳng. "số lượng: N" chấm theo
+            đúng nhóm chứa nó; thuộc tính của nhóm này nhắc cho thứ khác không tính. Sửa lỗi exp1: 5/5 dòng
+            bị loại vì "thiếu số lượng" thật ra có ghi số (<code>sen_001966</code> mất khỏi dataset). Dòng
+            cũ không có field này thì rơi về danh sách phẳng.</td></tr>
+    <tr><td>Chép nguyên văn mệnh đề thiếu</td>
+        <td>Cổng so khớp đúng chuỗi; judge diễn đạt lại thì cổng không nhận ra (với
+            <code>--max_missing 0</code> mặc định vẫn bị loại theo luật thường).</td></tr>
+    <tr><td>Nhãn thống kê</td>
+        <td>"thiếu 3 mệnh đề" → "thiếu mệnh đề", "thiếu chủ đề chính: […]" → "thiếu chủ đề chính"
+            (v1 ra nhãn hỏng kiểu "thiếu đề", "thêm tin").</td></tr>
+  </table>
+  </div>
+  <p><span class="muted">Số liệu exp1 để so: 583 prompt được chấm, 523 đạt (89,7%); lý do loại chủ yếu
+  là thêm tin (48) và thiếu mệnh đề (31).</span></p>
+</div>
+
+<!-- ---------- STEP 2b2 / 2c / 2d ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">2b2–2d</span>
+    <span class="step-title">Sửa 1 lần · chia tập · chuẩn hoá nhãn Y</span>
+    <span class="step-note">như v1</span>
+  </div>
+  <table>
+    <tr><th style="width:18mm">Bước</th><th>Làm gì</th></tr>
+    <tr><td>2b2</td><td>Tuỳ chọn (<code>--retry_rejected</code>): đưa đúng lý do cho LLM sửa phần bị nêu,
+        chấm lại bằng judge của 2b <strong>kèm cổng chủ đề</strong>, retry đúng 1 lần. exp1: cứu 50/60.</td></tr>
+    <tr><td>2c</td><td>Chia theo <code>id</code> ảnh (không theo cặp prompt) để cùng một ảnh không vừa ở
+        train vừa ở test. <code>sub_json</code> nay có thêm <code>chu_de_chinh</code>.</td></tr>
+    <tr><td>2d</td><td>Bóc <code>id</code>, khoá thứ tự key Ideogram 4. <code>step2d_final/</code> là dữ liệu
+        huấn luyện.</td></tr>
+  </table>
+  <p>Sau 2d, chạy <code>tools/check_filename_term.py</code> để đo tỉ lệ prompt còn thuật ngữ của chủ đề,
+  tách lỗi pipeline (target có mà prompt mất) khỏi ảnh mà target cũng không có thuật ngữ.
+  exp1: 37 dòng mất thuật ngữ dù target có — <strong>đây là con số v2 phải kéo xuống</strong>.</p>
+</div>
+
+<!-- ---------- STEP 3 ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">3</span>
+    <span class="step-title">Bộ đánh giá &amp; baseline</span>
+    <span class="step-note">làm TRƯỚC khi train · chưa có code</span>
+  </div>
+  <p>Như v1: cần thước đo để chọn checkpoint và tránh chọn thước đo sau khi đã thấy kết quả. Thêm cho v2
+  hai chỉ số đo đúng lỗi đã sửa: <strong>giữ chủ đề chính</strong> (JSON sinh ra có thể hiện
+  <code>chu_de_chinh</code> trong HLD không) và <strong>giữ thuật ngữ chủ đề</strong> (theo
+  <code>topic_terms.json</code>, không dấu, theo ranh giới từ).</p>
+</div>
+
+<!-- ---------- STEP 4 ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">4</span>
+    <span class="step-title">Huấn luyện SFT</span>
+    <span class="step-note">LoRA · Qwen3.6-27B</span>
+  </div>
+
+  <div class="io">
+    <div class="in"><div class="lbl">Đầu vào</div>
+      <ul><li>X = <code>user_prompt</code>, mức = <code>mode</code></li>
+          <li>Y = <code>target_json</code> từ <code>step2d_final/</code></li></ul></div>
+    <div class="out"><div class="lbl">Đầu ra</div>
+      <ul><li>LoRA adapter + 3 file system prompt theo mức</li></ul></div>
+  </div>
+
+  <p>Giữ nguyên hai quyết định của v1: <strong>một model cho cả 3 mức</strong>, và <strong>cả 3 mức dùng
+  chung nhãn Y đầy đủ</strong> — prompt short nghèo mà nhãn giàu thì model buộc phải học chi tiết hoá.
+  Mỗi mức một system prompt riêng, ứng dụng lúc infer phải biết đang phục vụ mức nào. Code:
+  <code>code/train/</code>.</p>
+
+  <div class="keep">
+  <h3>System prompt train — viết lại theo nhãn Y thật</h3>
+  <p>Nguyên tắc: khi SFT, model học theo Y. Luật trái với Y chỉ là nhiễu. Nên prompt chỉ mô tả những gì
+  caption ảnh thật <em>đang làm</em>, mượn cách viết từ magic prompt v1 của Ideogram 4 nhưng đã đối chiếu
+  từng luật với dữ liệu.</p>
+  <table>
+    <tr><th style="width:34mm">Phần</th><th>Nội dung</th><th style="width:52mm">Căn cứ trên test_5_new</th></tr>
+    <tr><td>Output contract</td><td>Một JSON minified; đúng thứ tự key; không bbox / color_palette /
+        aspect_ratio / id; không nêu medium thì là ảnh chụp</td><td>573/573 đúng thứ tự; 567/573 ảnh chụp</td></tr>
+    <tr><td>Fidelity</td><td>Giữ mọi ràng buộc; số mơ hồ giữ mơ hồ; request về hoạt động/cảnh thì caption
+        thể hiện hoạt động đó</td><td>Lỗi lệch chủ đề "làm gốm"</td></tr>
+    <tr><td>Thuật ngữ Việt</td><td>Giữ tên Việt đủ dấu, nêu trong HLD, lần đầu có thể kèm gloss tiếng Anh
+        trong ngoặc</td><td>154/199 HLD có thuật ngữ; 88 ảnh có gloss, 76 ở HLD</td></tr>
+    <tr><td>Hướng dẫn field</td><td>HLD một câu; aesthetics vài tag; lighting = nguồn + tính chất; photo =
+        góc + cỡ cảnh + lấy nét; desc một câu: danh tính → thuộc tính → vị trí</td>
+        <td>HLD 1 câu 182/199; desc p50 18 từ; 62% desc có vị trí</td></tr>
+    <tr><td>Theo mức</td><td>short: mở rộng thành cảnh thực tế điển hình ở Việt Nam (giữ tối giản nếu là ảnh
+        sản phẩm); medium: giữ ý, lấp chỗ trống; long: đưa từng ý vào đúng field, không bỏ ý</td><td>—</td></tr>
+  </table>
+  </div>
+
+  <div class="callout">
+    <div class="t">Không mượn từ magic prompt v1 — vì trái với caption ảnh thật</div>
+    Cấm chữ "warm" (Y có "warm" ở ~20% dòng), mặc định thẩm mỹ iPhone, "text everywhere" (cả tập chỉ 6
+    text element), một chủ thể = một element (Y tách đồ đeo/cầm ở 90 element), sàn luôn nằm trong
+    background, bắt element đầu là chủ thể chính (chỉ 26/139 ảnh như vậy).
+  </div>
+
+  <div class="keep">
+  <h3>Kỹ thuật</h3>
+  <table>
+    <tr><th style="width:44mm">Hạng mục</th><th>Trạng thái</th></tr>
+    <tr><td>Độ dài chuỗi</td><td>Prompt ~950–1060 từ, test chặn &gt; 1200. Mẫu dài nhất ước lượng ~3,1k token
+        &lt; <code>--max_seq_length 4096</code>; số chính xác xem <code>check_env.py --data_file</code>.</td></tr>
+    <tr><td>Label masking</td><td>Đã đối chiếu chat template thật của <code>unsloth/Qwen3.6-27B</code>: ở
+        <code>no_cot</code>, prefix <code>&lt;|im_start|&gt;assistant\n&lt;think&gt;\n\n&lt;/think&gt;\n\n</code>
+        khớp đầu lượt assistant; loss chỉ trên JSON. Lúc infer dùng <code>enable_thinking=False</code>.</td></tr>
+    <tr><td>1 GPU</td><td><code>--backend unsloth</code>: QLoRA, vừa một A100 40GB; script chặn khi
+        <code>WORLD_SIZE &gt; 1</code>. Unsloth nay được import trước transformers.</td></tr>
+    <tr><td>Nhiều GPU</td><td><code>--backend hf</code> + <code>torchrun</code>: DDP, mỗi GPU giữ một bản
+        model 4-bit (~15GB + ~10GB embedding/lm_head float32 + activation) — 80GB thoải mái, 40GB sát.
+        Không chia model qua GPU. Tự thử <code>AutoModelForImageTextToText</code> nếu
+        <code>AutoModelForMultimodalLM</code> không nhận model.</td></tr>
+  </table>
+  </div>
+</div>
+
+<!-- ---------- STEP 5 ---------- -->
+<div class="step">
+  <div class="step-head">
+    <span class="num">5</span>
+    <span class="step-title">Đánh giá</span>
+    <span class="step-note">chưa có code</span>
+  </div>
+  <p>Tách riêng short / medium / long. Giữ bộ chỉ số v1 (hợp lệ schema, trung thành với checklist, thuật ngữ
+  văn hoá, không mâu thuẫn, độ dày, đa dạng ở short, tương đồng và bịa đặt ở long) và thêm hai chỉ số của
+  bước 3. So với adapter train trên exp1 để biết v2 có thật sự giảm lệch chủ đề không.</p>
+</div>
+
+<h2 style="margin-top:7mm">Thứ tự chạy</h2>
+<table>
+  <tr><th style="width:8mm">#</th><th>Việc</th><th style="width:62mm">Lệnh / đầu ra</th></tr>
+  <tr><td>1</td><td>Chạy lại pipeline từ 1a trên tập thử (cache 1a cũ thiếu <code>chu_de_chinh</code> nên tự bị gọi lại)</td>
+      <td><code>bash run_all.sh --out_dir outputs/test_7 --from 1a --retry_rejected</code></td></tr>
+  <tr><td>2</td><td>Soi chất lượng chủ đề: tỉ lệ <code>khop_goi_y</code>, <code>failures.json</code> của 1a, đọc tay chủ đề các ảnh hoạt động/cảnh</td>
+      <td><code>step1a_decompose/decompose.jsonl</code></td></tr>
+  <tr><td>3</td><td>So với exp1: tỉ lệ đạt 2b, lý do loại, số dòng mất thuật ngữ</td>
+      <td><code>step2b_filtered/report.json</code>, <code>tools/check_filename_term.py</code></td></tr>
+  <tr><td>4</td><td>Kiểm tra môi trường + độ dài token trên server</td>
+      <td><code>check_env.py --model_name $MODEL_DIR --data_file …/train.jsonl</code></td></tr>
+  <tr><td>5</td><td>Smoke test train vài step, đọc <em>First supervised target preview</em></td>
+      <td>phải bắt đầu bằng <code>{"high_level_description"</code></td></tr>
+  <tr><td>6</td><td>Chạy full 28k, train, đánh giá</td><td>bước 3–5</td></tr>
+</table>
+
+<div class="keep">
+<h2 style="margin-top:7mm">Việc còn mở</h2>
+<table>
+  <tr><th style="width:52mm">Vấn đề</th><th>Bằng chứng / hệ quả</th><th style="width:16mm">Ưu tiên</th></tr>
+  <tr><td>Chưa chạy luồng v2 với LLM thật</td>
+      <td>Mọi thay đổi mới chỉ qua test offline (method_1 168/168, train 30/30)</td><td>cao</td></tr>
+  <tr><td>Persona tiếng Anh nhưng prompt tiếng Việt</td>
+      <td>~25/112 dòng; 2b không kiểm tra ngôn ngữ</td><td>vừa</td></tr>
+  <tr><td>2c bỏ cờ <code>corrected</code>, <code>original_prompt</code></td>
+      <td>Dữ liệu cuối không phân biệt được dòng đã sửa — không lọc được khỏi val/test như khuyến nghị</td><td>vừa</td></tr>
+  <tr><td>Step 0 chưa lọc file "… copy"</td>
+      <td>Có id <code>ao_dai_000455 copy</code> ở một run khác — cùng ảnh có thể rơi vào cả train và test</td><td>vừa</td></tr>
+  <tr><td>1a không có vòng sửa lỗi</td>
+      <td>Chủ đề quá 3 mệnh đề / 10 từ → ảnh vào <code>failures.json</code> thay vì được gọi lại</td><td>thấp</td></tr>
+  <tr><td><code>can_1a_xac_nhan</code> trong bảng chủ đề chưa dùng</td>
+      <td>14 slug được đánh dấu cần xác nhận; hiện 1a xác nhận cho mọi ảnh qua <code>khop_goi_y</code></td><td>thấp</td></tr>
+  <tr><td>Prompt medium vượt trần</td>
+      <td>43/192 dòng &gt; 55 từ (trần chỉ áp cho checklist, lời dẫn persona cộng thêm)</td><td>thấp</td></tr>
+</table>
+</div>
+
+</body>
+</html>
