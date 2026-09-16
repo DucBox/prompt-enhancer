@@ -120,8 +120,21 @@ torchrun --nproc_per_node=4 train_prompt_enhancer_qwen36.py \
 JSON trực tiếp) — khác với `mode` (short/medium/long) trong dữ liệu, tên trùng
 nhau nhưng là hai khái niệm độc lập; xem `--detail_level_field` ở trên.
 
-Kết quả: `./runs/pe_v1/final_adapter/` chứa LoRA adapter + tokenizer + 3 file
-system prompt + `training_args.json` (để tái lập chính xác lần train này).
+Kết quả trong `--output_dir`:
+
+| Thư mục | Là gì |
+|---|---|
+| `final_adapter/` | **last** — trọng số ở step cuối |
+| `best_adapter/` | **best** — trọng số có `eval_loss` thấp nhất (chỉ có khi truyền `--eval_file`) |
+| `checkpoint-*/` | checkpoint theo `--save_steps`, giữ `--save_total_limit` bản gần nhất (để train tiếp) |
+
+`final_adapter/` và `best_adapter/` đều chứa LoRA adapter + tokenizer + 3 file system prompt +
+`training_args.json` + `adapter_info.json` (`kind`, `step`, `epoch`, `eval_loss`) — trỏ thẳng
+`infer.py --adapter_dir` vào thư mục nào cũng được.
+
+Best được xét sau **mỗi lần evaluate** (mỗi `--eval_steps`) và thêm một lần evaluate trên trọng số
+cuối khi train xong. `--eval_steps` lớn hơn tổng số step thì không có eval giữa chừng -> best trùng
+last (script sẽ in cảnh báo). Dữ liệu nhỏ (vài trăm dòng) nên đặt `--eval_steps` khoảng 5–10.
 
 ## Việc cần làm sau khi train xong
 

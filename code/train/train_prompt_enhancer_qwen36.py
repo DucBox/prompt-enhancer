@@ -189,6 +189,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--resume_from_checkpoint", default=None)
     p.add_argument("--seed", type=int, default=3407)
     p.add_argument("--num_workers", type=int, default=4)
+    p.add_argument("--prepare_log_every", type=int, default=2000,
+                   help="In tiến độ chuẩn bị dữ liệu mỗi N dòng")
 
     p.add_argument("--allow_bbox_palette", action="store_true",
                    help="By default, reject targets containing bbox/color_palette to match this PE project")
@@ -266,6 +268,30 @@ def _as_ids(x: Any) -> List[int]:
     return ids
 
 
+class Progress:
+    """In tiến độ theo chu kỳ, kèm tốc độ và ước lượng thời gian còn lại.
+
+    prepare_dataset với 80k dòng chạy hàng chục phút mà trước đây KHÔNG in gì cho tới khi xong
+    -- nhìn y như treo. Chỉ rank 0 in, các rank khác im lặng cho đỡ rối log.
+    """
+
+    def __init__(self, label: str, total: int, every: int) -> None:
+        self.label, self.total, self.every = label, total, max(1, every)
+        self.t0 = time.time()
+        self.quiet = os.environ.get("RANK", "0") != "0"
+        self.last = 0
+
+    def update(self, done: int) -> None:
+        if self.quiet or (done < self.total and done - self.last < self.every):
+            return
+        self.last = done
+        elapsed = max(time.time() - self.t0, 1e-6)
+        rate = done / elapsed
+        eta = (self.total - done) / rate if rate > 0 else 0.0
+        print(f"[prepare] {self.label}: {done:,}/{self.total:,} ({done / max(self.total, 1):.0%}) | "
+              f"{rate:,.0f} dòng/s | đã {elapsed / 60:.1f} phút, còn ~{eta / 60:.1f} phút", flush=True)
+
+
 def encode_record(ex: Dict[str, Any], tokenizer, args: argparse.Namespace,
                   system_prompt_override: Optional[str]) -> Dict[str, Any]:
     user_prompt = str(ex.get(args.prompt_field, "")).strip()
@@ -326,9 +352,13 @@ def encode_record(ex: Dict[str, Any], tokenizer, args: argparse.Namespace,
 
 def prepare_dataset(path: str, tokenizer, args: argparse.Namespace,
                     system_prompt_override: Optional[str]) -> Dataset:
+    """Đọc JSONL -> ids + nhãn, encode từng dòng, có in tiến độ."""
     with dbg_step(f"đọc {path}"):
         raw = read_jsonl_rows(path)  # KHÔNG dùng load_dataset("json") -- xem data_utils.py
-    dbg(f"{len(raw)} dòng, bắt đầu encode (apply_chat_template)")
+
+    print(f"[prepare] {path}: {len(raw):,} dòng, bắt đầu encode", flush=True)
+    progress = Progress("encode", len(raw), args.prepare_log_every)
+
     rows: List[Dict[str, Any]] = []
     errors = 0
     too_long = 0
@@ -339,23 +369,27 @@ def prepare_dataset(path: str, tokenizer, args: argparse.Namespace,
         except Exception as e:
             errors += 1
             if errors <= 10:
-                print(f"[data error] row={i}: {e}")
+                print(f"[data error] row={i}: {e}", flush=True)
+            progress.update(i + 1)
             continue
         if not item.pop("_keep"):
             too_long += 1
+            progress.update(i + 1)
             continue
         length = item.pop("_length")
-        if DEBUG and i < 3:
+        if DEBUG and len(rows) < 3:
             n_sup = sum(1 for lab in item["labels"] if lab != -100)
             dbg(f"row {i}: {length} token, {n_sup} token có nhãn")
         rows.append(item)
+        progress.update(i + 1)
 
     if not rows:
         raise RuntimeError("No valid training rows remain after validation/length filtering")
 
     print(
         f"Prepared {len(rows):,}/{len(raw):,} rows from {path}; "
-        f"invalid={errors:,}, over_max_seq={too_long:,}, max_seq={args.max_seq_length}"
+        f"invalid={errors:,}, over_max_seq={too_long:,}, max_seq={args.max_seq_length}",
+        flush=True,
     )
     return Dataset.from_list(rows)
 
@@ -432,6 +466,50 @@ class DebugStepCallback(TrainerCallback):
 
     def on_save(self, args, state, control, **kw):
         dbg(f"save checkpoint tại step {state.global_step}")
+
+
+class BestAdapterCallback(TrainerCallback):
+    """Sau MỖI lần evaluate: eval_loss thấp hơn mức tốt nhất đang có -> ghi đè <output_dir>/best_adapter.
+
+    Không dùng load_best_model_at_end của Trainer: cái đó nạp lại bản best vào model khi kết thúc,
+    làm mất bản LAST, và bản best có thể bị save_total_limit xoá mất. Ở đây best_adapter là thư mục
+    riêng, final_adapter vẫn là bản last, checkpoint-* theo --save_steps chạy độc lập.
+    """
+
+    def __init__(self, best_dir: Path, write_extras, resume: bool) -> None:
+        self.best_dir = best_dir
+        self.write_extras = write_extras  # (dir, info) -> ghi tokenizer + system prompt + info
+        self.best_loss: Optional[float] = None
+        self.best_step: Optional[int] = None
+        info_file = best_dir / "adapter_info.json"
+        if resume and info_file.is_file():  # train tiếp: giữ mốc best của lần chạy trước
+            info = json.loads(info_file.read_text(encoding="utf-8"))
+            self.best_loss, self.best_step = info.get("eval_loss"), info.get("step")
+
+    def on_train_begin(self, args, state, control, **kw):
+        if state.is_world_process_zero and args.eval_strategy != "no" and args.eval_steps \
+                and state.max_steps and args.eval_steps >= state.max_steps:
+            print(f"[best_adapter] eval_steps={args.eval_steps} >= tổng {state.max_steps} step -> không có eval "
+                  "giữa chừng, best chỉ được xét ở lần evaluate cuối (sẽ trùng last). Giảm --eval_steps.",
+                  flush=True)
+
+    def on_evaluate(self, args, state, control, metrics=None, model=None, **kw):
+        loss = (metrics or {}).get("eval_loss")
+        if loss is None or model is None:
+            return
+        if self.best_loss is not None and loss >= self.best_loss:
+            if state.is_world_process_zero:
+                print(f"[best_adapter] step {state.global_step}: eval_loss={loss:.4f} "
+                      f"(best vẫn là {self.best_loss:.4f} @ step {self.best_step})", flush=True)
+            return
+        self.best_loss, self.best_step = float(loss), int(state.global_step)
+        if not state.is_world_process_zero:  # mọi rank cập nhật mốc, chỉ rank 0 ghi file
+            return
+        model.save_pretrained(str(self.best_dir))
+        self.write_extras(self.best_dir, {
+            "kind": "best", "step": self.best_step, "epoch": state.epoch, "eval_loss": self.best_loss,
+        })
+        print(f"[best_adapter] step {self.best_step}: eval_loss={loss:.4f} -> lưu {self.best_dir}", flush=True)
 
 
 class SuffixLossTrainer(Trainer):
@@ -674,7 +752,21 @@ def main() -> None:
         gradient_checkpointing_kwargs={"use_reentrant": False} if args.backend == "hf" else None,
         seed=args.seed,
         data_seed=args.seed,
+        # Chỉ cần eval_loss (để chọn best_adapter). Không gom logits vocab ~248k của cả tập val.
+        prediction_loss_only=True,
     )
+
+    def write_extras(out_dir: Path, info: Dict[str, Any]) -> None:
+        write_adapter_extras(out_dir, processor, tokenizer, args, system_prompt_override, info)
+
+    best_dir = Path(args.output_dir) / "best_adapter"
+    callbacks: List[TrainerCallback] = []
+    if eval_ds is not None:
+        callbacks.append(BestAdapterCallback(best_dir, write_extras, resume=bool(args.resume_from_checkpoint)))
+    elif rank == 0:
+        print("[best_adapter] không có --eval_file -> KHÔNG lưu best_adapter, chỉ có final_adapter (last)")
+    if DEBUG:
+        callbacks.append(DebugStepCallback())
 
     collator = CausalLMCollator(pad_token_id=tokenizer.pad_token_id)
     # Unsloth tự vá phần tính loss; chỉ backend hf cần cắt logits về đoạn có nhãn.
@@ -686,7 +778,7 @@ def main() -> None:
             train_dataset=train_ds,
             eval_dataset=eval_ds,
             data_collator=collator,
-            callbacks=[DebugStepCallback()] if DEBUG else None,
+            callbacks=callbacks or None,
         )
 
     # Verify exactly where loss is active on one example before spending GPU-hours.
@@ -699,30 +791,48 @@ def main() -> None:
     with dbg_step("trainer.train (step đầu gồm cả DDP sync -- treo ở đây thường do NCCL)"):
         trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
 
-    final_dir = str(Path(args.output_dir) / "final_adapter")
+    # Evaluate thêm 1 lần trên trọng số CUỐI: step cuối thường không rơi đúng mốc eval_steps,
+    # nên không có lần này thì bản last không bao giờ được xét làm best.
+    last_eval_loss: Optional[float] = None
+    if eval_ds is not None:
+        with dbg_step("evaluate trọng số cuối"):
+            last_eval_loss = trainer.evaluate().get("eval_loss")
+
+    final_dir = Path(args.output_dir) / "final_adapter"
     with dbg_step(f"save_model -> {final_dir}"):
-        trainer.save_model(final_dir)
+        trainer.save_model(str(final_dir))
     if trainer.is_world_process_zero():
-        try:
-            processor.save_pretrained(final_dir)
-        except Exception:
-            tokenizer.save_pretrained(final_dir)
-        Path(final_dir, "training_args.json").write_text(
-            json.dumps(vars(args), ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        # Lưu ĐÚNG những system prompt đã dùng lúc train -- lúc infer, app phải chọn
-        # đúng file tương ứng với mức đang phục vụ (short/medium/long), không được
-        # tự bịa hay dùng lẫn, nếu không sẽ lệch train/infer.
-        if system_prompt_override is not None:
-            Path(final_dir, "system_prompt_override.txt").write_text(
-                system_prompt_override, encoding="utf-8"
-            )
-        else:
-            for level in LEVELS:
-                Path(final_dir, f"system_prompt_{level}.txt").write_text(
-                    build_system_prompt(level), encoding="utf-8"
-                )
-        print(f"Saved adapter to: {final_dir}")
+        write_extras(final_dir, {
+            "kind": "last", "step": trainer.state.global_step, "epoch": trainer.state.epoch,
+            "eval_loss": last_eval_loss,
+        })
+        print(f"Saved LAST adapter to: {final_dir} (eval_loss={last_eval_loss})")
+        best_info = best_dir / "adapter_info.json"
+        if best_info.is_file():
+            info = json.loads(best_info.read_text(encoding="utf-8"))
+            print(f"Saved BEST adapter to: {best_dir} (step {info['step']}, eval_loss={info['eval_loss']:.4f})")
+
+
+def write_adapter_extras(out_dir: Path, processor, tokenizer, args: argparse.Namespace,
+                         system_prompt_override: Optional[str], info: Dict[str, Any]) -> None:
+    """Ghi kèm adapter: tokenizer/processor, training_args, system prompt đã dùng, adapter_info.json."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        processor.save_pretrained(str(out_dir))
+    except Exception:
+        tokenizer.save_pretrained(str(out_dir))
+    Path(out_dir, "training_args.json").write_text(
+        json.dumps(vars(args), ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    # Lưu ĐÚNG những system prompt đã dùng lúc train -- lúc infer, app phải chọn
+    # đúng file tương ứng với mức đang phục vụ (short/medium/long), không được
+    # tự bịa hay dùng lẫn, nếu không sẽ lệch train/infer.
+    if system_prompt_override is not None:
+        Path(out_dir, "system_prompt_override.txt").write_text(system_prompt_override, encoding="utf-8")
+    else:
+        for level in LEVELS:
+            Path(out_dir, f"system_prompt_{level}.txt").write_text(build_system_prompt(level), encoding="utf-8")
+    Path(out_dir, "adapter_info.json").write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":
