@@ -549,8 +549,12 @@ Hãy kiểm tra hai điều:
               chỉ nghĩa mới quan trọng.)
   B. THÊM   — prompt có nói ra thông tin cụ thể nào KHÔNG hề có trong danh sách không?
              (Từ nối, cách hành văn, lời dẫn kiểu "mình muốn một tấm ảnh" KHÔNG tính là thêm.
-              Chỉ tính khi thêm vật thể, màu sắc, số lượng, hành động, địa điểm mới.
-              Dịch một mệnh đề sang ngôn ngữ khác KHÔNG tính là thêm, dù không giống chữ.)
+              Chỉ tính khi thêm vật thể, màu sắc, hành động, địa điểm mới.
+              Dịch một mệnh đề sang ngôn ngữ khác KHÔNG tính là thêm, dù không giống chữ.
+              Cách nói SỐ LƯỢNG không bao giờ tính là thêm — số lượng chỉ xét ở phần THIẾU.
+              Thứ đã bị tính THIẾU thì KHÔNG được tính THÊM lần nữa cho cùng nội dung đó:
+              prompt viết "pink floral dress" cho mệnh đề "mặc váy hoa hồng" là MỘT chuyện,
+              chọn một trong hai, không báo cả hai.)
 
 NGOẠI LỆ DUY NHẤT — thuật ngữ văn hoá Việt Nam: nếu một mệnh đề là tên riêng hoặc khái niệm
 mang bản sắc Việt Nam (ví dụ: áo dài, khăn xếp, chợ nổi Cái Răng, cây bẹo, thanh đồng, lễ Hầu
@@ -565,9 +569,21 @@ chất liệu, hành động của nhóm này nhắc cho thứ khác trong promp
 MỆNH ĐỀ SỐ LƯỢNG: "số lượng: N" là số cá thể của CHÍNH NHÓM chứa nó, không phải của nhóm khác.
   - Nhóm có "người phụ nữ" và "số lượng: 3", prompt viết "ba người phụ nữ" hoặc "3 người phụ nữ"
     → ĐÃ nhắc tới.
-  - Prompt nêu số khác, hoặc chỉ nói mơ hồ ("mấy", "vài", "nhiều") cho nhóm đó → THIẾU.
-  - Nhóm "so_nhieu": true mà prompt nói mơ hồ ("mấy chiếc thuyền") là ĐÚNG; prompt tự đặt ra một
-    con số cụ thể cho nhóm đó → tính là THÊM.
+  - Prompt nêu số khác, hoặc chỉ nói mơ hồ ("mấy", "vài", "nhiều") cho nhóm đó → THIẾU mệnh đề
+    "số lượng: N" đó. CHỈ báo thiếu đúng mệnh đề số lượng, KHÔNG báo kèm chỗ nói mơ hồ ở phần
+    THÊM — một lỗi chỉ được tính một lần.
+  - Nhóm "so_nhieu": true (nhiều cái nhưng không nêu số) thì prompt nói mơ hồ hay nói một con số
+    cụ thể đều ĐƯỢC, không tính là thiếu cũng không tính là thêm.
+  - Nhóm KHÔNG có mệnh đề "số lượng" nào thì prompt nói số lượng kiểu gì cũng được.
+
+SỐ LƯỢNG SAI QUAN TRỌNG TỚI ĐÂU — chấm "muc_do" cho mệnh đề "số lượng: N" bị thiếu:
+  - "cot_loi" khi con số LÀ nội dung bức ảnh: nhóm nằm trong "chu_de_chinh" hoặc là chủ thể
+    chính. Ví dụ ảnh chụp MỘT CẶP ĐÔI (2 người), mâm cơm 7 món trong 7 cái bát, nhóm nhạc
+    10 người đang biểu diễn, bốn người quây quanh bàn xoay gốm → sai số là ảnh ra sai hẳn.
+  - "phu" khi đó chỉ là tiểu cảnh, vật hậu cảnh, người qua đường, đồ trang trí phụ: ba người
+    đứng xem từ xa, mấy chiếc thuyền phía chân trời, vài cái bát ở góc bàn → gọi thành "một
+    nhóm người", "mấy chiếc thuyền" thì ảnh vẫn đúng nội dung và vẫn đẹp.
+  Hỏi đơn giản: người xem có đếm cái đó không? Có thì "cot_loi", không thì "phu".
 
 MỆNH ĐỀ VỊ TRÍ CÓ LẶP TÊN CHỦ THỂ: một số mệnh đề vị trí lặp lại tên chủ thể/nhóm ở cuối câu,
 ví dụ "ở tai phải thanh đồng", "cầm ở tay trái thanh đồng". Một prompt viết tự nhiên KHÔNG lặp
@@ -584,7 +600,8 @@ Tự hỏi: nếu đưa prompt này cho một AI vẽ ảnh, thiếu mệnh đ�
 thứ người dùng muốn không?
   - "cot_loi" — thiếu nó thì ảnh ra SAI thứ, hoặc mất đúng cái làm nên bức ảnh này:
       chủ thể, món ăn, trang phục, địa danh, thuật ngữ văn hoá Việt Nam;
-      số lượng của chủ thể chính; màu sắc / chất liệu của chủ thể chính;
+      số lượng của chủ thể chính (xem khối SỐ LƯỢNG SAI QUAN TRỌNG TỚI ĐÂU ở trên);
+      màu sắc / chất liệu của chủ thể chính;
       hành động chính đang diễn ra; bối cảnh có bản sắc (chợ nổi, phố cổ, cánh đồng lúa).
   - "phu" — thiếu nó ảnh vẫn đúng yêu cầu, chỉ khác đi ở chi tiết nhỏ:
       thông số máy ảnh và hậu kỳ (lấy nét sâu, độ sâu trường ảnh nông, cỡ cảnh, góc máy);
@@ -597,9 +614,10 @@ CHẤM MỨC QUAN TRỌNG CHO MỖI THÔNG TIN THÊM ("muc_do") — tự hỏi: 
 sinh ra KHÁC ĐI so với danh sách mệnh đề không?
   - "them_vat_the" — có làm ảnh khác đi, phải bắt:
       thêm vật thể / người / món đồ mới (mấy khung cửa gỗ, bát nước chấm, đôi đũa);
-      thêm hoặc đổi màu sắc, chất liệu, vị trí, hành động của thứ đã có;
-      nói số lượng khác với mệnh đề "số lượng: N", kể cả nói mơ hồ ("mấy cái", "several")
-      khi mệnh đề ghi con số cụ thể.
+      thêm hoặc đổi màu sắc, chất liệu, vị trí, hành động của thứ đã có.
+      KHÔNG xếp vào đây một danh từ đã xuất hiện BÊN TRONG một mệnh đề khác — thường là mệnh đề
+      vị trí: danh sách có "trên bàn cạnh cốc nhựa" thì prompt nhắc "cốc nhựa" là ĐƯỢC PHÉP;
+      có "trên mặt tiền tầng trên" thì nhắc "mặt tiền" là ĐƯỢC PHÉP.
   - "cam_nhan" — KHÔNG làm ảnh khác đi, chỉ là cách người dùng nói:
       cảm nhận chủ quan, lời khen ("trông đẹp mắt quá", "nhìn ngon mắt", "rực rỡ");
       lời dẫn, lý do đặt hàng, cách xưng hô ("tôi đang làm đồ án", "cho mình xin một tấm",

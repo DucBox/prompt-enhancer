@@ -124,6 +124,13 @@ mạng — dùng để soi prompt trước khi đốt tiền.
   tin. Mệnh đề `phu` được BỎ QUA — user thật không nói những thứ đó, và model được train phải
   tự bổ sung. `report.json` ghi `missing_phu_top` và `n_passed_with_missing_phu` để soi lại
   xem judge có nới tay quá không; verdict cũ (danh sách chuỗi, không nhãn) được coi là `cot_loi`.
+- **Số lượng: chặt với chủ thể chính, thoáng với tiểu cảnh.** Sai số lượng luôn được báo ở phần
+  THIẾU (mệnh đề `số lượng: N`), không bao giờ báo kèm ở phần THÊM — một lỗi tính một lần. Judge
+  chấm `cot_loi` khi con số LÀ nội dung ảnh (một cặp đôi, mâm cơm 7 món trong 7 bát, nhóm nhạc
+  10 người, bốn người quanh bàn xoay gốm) và `phu` khi chỉ là tiểu cảnh hay vật hậu cảnh (ba
+  người đứng xem từ xa, mấy chiếc thuyền phía chân trời) — gọi thành "một nhóm người" ở những
+  chỗ đó thì ảnh vẫn đúng. Nhóm `so_nhieu` hoặc nhóm không có mệnh đề số lượng thì nói kiểu gì
+  cũng được.
 - **THÊM cũng chia hai mức.** `them_vat_the` (vật thể / người / màu / chất liệu / vị trí / hành
   động mới, hoặc số lượng khác mệnh đề "số lượng: N") thì loại NGAY — prompt đòi thứ không có
   trong ảnh sẽ dạy model bỏ qua yêu cầu của user. `cam_nhan` (lời khen "trông đẹp mắt quá", lời

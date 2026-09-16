@@ -1060,6 +1060,22 @@ class TestFilterDecision(unittest.TestCase):
         self.assertEqual(items, [{"thong_tin": "con mèo", "muc_do": "them_vat_the"},
                                  {"thong_tin": "đẹp quá", "muc_do": "cam_nhan"}])
 
+    def test_judge_prompt_scales_count_strictness_by_group(self):
+        """Ý user: cặp đôi / 7 món trong 7 bát / nhóm nhạc 10 người thì số lượng BẮT BUỘC đúng;
+        ba người đứng xem từ xa thì gọi 'một nhóm người' cũng không sao."""
+        text = prompts.STEP2B_SYSTEM
+        for phrase in ("SỐ LƯỢNG SAI QUAN TRỌNG TỚI ĐÂU", "chu_de_chinh", "tiểu cảnh",
+                       "người xem có đếm cái đó không"):
+            self.assertIn(phrase, text)
+
+    def test_judge_prompt_counts_a_count_error_once(self):
+        text = prompts.STEP2B_SYSTEM
+        self.assertIn("Cách nói SỐ LƯỢNG không bao giờ tính là thêm", text)
+        self.assertIn("một lỗi chỉ được tính một lần", text)
+
+    def test_judge_prompt_allows_noun_nested_in_another_fact(self):
+        self.assertIn("trên bàn cạnh cốc nhựa", prompts.STEP2B_SYSTEM)
+
     def test_judge_prompt_defines_extra_labels(self):
         for phrase in ("them_vat_the", "cam_nhan", 'Không chắc thì chọn "them_vat_the"'):
             self.assertIn(phrase, prompts.STEP2B_SYSTEM)
