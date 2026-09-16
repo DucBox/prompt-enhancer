@@ -122,9 +122,15 @@ mạng — dùng để soi prompt trước khi đốt tiền.
   ngày, nhỏ, ở góc dưới bên phải...); không chắc thì chấm `cot_loi`. Code chỉ loại khi thiếu
   mệnh đề chủ đề chính, thiếu `cot_loi` quá `--max_missing` (mặc định 0), hoặc có THÊM thông
   tin. Mệnh đề `phu` được BỎ QUA — user thật không nói những thứ đó, và model được train phải
-  tự bổ sung. THÊM vẫn chặt như cũ vì prompt đòi thứ không có trong ảnh sẽ dạy model bỏ qua yêu
-  cầu của user. `report.json` ghi `missing_phu_top` và `n_passed_with_missing_phu` để soi lại
+  tự bổ sung. `report.json` ghi `missing_phu_top` và `n_passed_with_missing_phu` để soi lại
   xem judge có nới tay quá không; verdict cũ (danh sách chuỗi, không nhãn) được coi là `cot_loi`.
+- **THÊM cũng chia hai mức.** `them_vat_the` (vật thể / người / màu / chất liệu / vị trí / hành
+  động mới, hoặc số lượng khác mệnh đề "số lượng: N") thì loại NGAY — prompt đòi thứ không có
+  trong ảnh sẽ dạy model bỏ qua yêu cầu của user. `cam_nhan` (lời khen "trông đẹp mắt quá", lời
+  dẫn "tôi đang làm đồ án", diễn đạt lại thứ đã có) không làm ảnh khác đi nên được BỎ QUA, bao
+  nhiêu chỗ cũng được — judge đã cân nhắc từng chỗ nên code không đặt thêm trần đếm; ép sạch
+  loại này thì dữ liệu chỉ còn prompt khô cứng, không giống user thật. Không chắc thì judge chấm
+  `them_vat_the`. `report.json` ghi `extra_cam_nhan_top` và `n_passed_with_extra_cam_nhan`.
 - **Sửa lại prompt bị loại (`--retry_rejected`).** Mặc định TẮT. Bật lên thì sau step 2b,
   `step2b2_correct.py` đưa đúng lý do bị loại (thiếu `cot_loi` / thừa, KHÔNG nhồi mệnh đề phụ
   đã bỏ qua) cho model sửa lại — CHỈ sửa

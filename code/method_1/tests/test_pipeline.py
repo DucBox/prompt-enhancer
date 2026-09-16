@@ -1030,6 +1030,40 @@ class TestFilterDecision(unittest.TestCase):
         verdict = {"missing": [{"menh_de": "mờ", "muc_do": "phu"}], "extra": ["con mèo"]}
         self.assertFalse(s2b.decide(verdict, _Args())["passed"])
 
+    def test_creative_extra_passes(self):
+        """Ý user: thêm tiểu tiết mang tính cảm nhận, không ảnh hưởng tới ảnh, thì không loại --
+        user thật luôn nói thừa kiểu 'trông đẹp mắt quá'."""
+        verdict = {"missing": [],
+                   "extra": [{"thong_tin": "xếp cạnh nhau trông đẹp mắt quá", "muc_do": "cam_nhan"},
+                             {"thong_tin": "tôi đang làm đồ án", "muc_do": "cam_nhan"}]}
+        out = s2b.decide(verdict, _Args())
+        self.assertTrue(out["passed"])
+        self.assertEqual(len(out["extra_cam_nhan"]), 2)
+        self.assertEqual(out["extra_them_vat_the"], [])
+
+    def test_no_cap_on_number_of_creative_extras(self):
+        """Không đặt trần đếm: judge đã cân nhắc từng chỗ, 5 chỗ vô hại vẫn lành hơn 1 chỗ
+        thêm vật thể."""
+        verdict = {"missing": [], "extra": [{"thong_tin": "hay quá", "muc_do": "cam_nhan"}] * 5}
+        self.assertTrue(s2b.decide(verdict, _Args())["passed"])
+
+    def test_new_object_fails_even_if_only_one(self):
+        verdict = {"missing": [], "extra": [{"thong_tin": "mấy khung cửa gỗ",
+                                             "muc_do": "them_vat_the"}]}
+        out = s2b.decide(verdict, _Args())
+        self.assertFalse(out["passed"])
+        self.assertIn("thêm 1 thông tin", out["reasons"][0])
+
+    def test_legacy_string_extra_counts_as_new_object(self):
+        items = s2b.extra_items({"extra": ["con mèo", {"thong_tin": "đẹp quá",
+                                                       "muc_do": "cam_nhan"}]})
+        self.assertEqual(items, [{"thong_tin": "con mèo", "muc_do": "them_vat_the"},
+                                 {"thong_tin": "đẹp quá", "muc_do": "cam_nhan"}])
+
+    def test_judge_prompt_defines_extra_labels(self):
+        for phrase in ("them_vat_the", "cam_nhan", 'Không chắc thì chọn "them_vat_the"'):
+            self.assertIn(phrase, prompts.STEP2B_SYSTEM)
+
     def test_legacy_string_missing_counts_as_core(self):
         """Verdict cũ (danh sách chuỗi) không có nhãn -- phải coi là cốt lõi, không nới lỏng."""
         items = s2b.missing_items({"missing": ["áo dài", {"menh_de": "mờ", "muc_do": "phu"}]})

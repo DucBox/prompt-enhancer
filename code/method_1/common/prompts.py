@@ -593,12 +593,28 @@ thứ người dùng muốn không?
       chi tiết của vật phụ ở hậu cảnh.
 Không chắc thì chọn "cot_loi".
 
+CHẤM MỨC QUAN TRỌNG CHO MỖI THÔNG TIN THÊM ("muc_do") — tự hỏi: chỗ thêm này có làm bức ảnh
+sinh ra KHÁC ĐI so với danh sách mệnh đề không?
+  - "them_vat_the" — có làm ảnh khác đi, phải bắt:
+      thêm vật thể / người / món đồ mới (mấy khung cửa gỗ, bát nước chấm, đôi đũa);
+      thêm hoặc đổi màu sắc, chất liệu, vị trí, hành động của thứ đã có;
+      nói số lượng khác với mệnh đề "số lượng: N", kể cả nói mơ hồ ("mấy cái", "several")
+      khi mệnh đề ghi con số cụ thể.
+  - "cam_nhan" — KHÔNG làm ảnh khác đi, chỉ là cách người dùng nói:
+      cảm nhận chủ quan, lời khen ("trông đẹp mắt quá", "nhìn ngon mắt", "rực rỡ");
+      lời dẫn, lý do đặt hàng, cách xưng hô ("tôi đang làm đồ án", "cho mình xin một tấm",
+      "chụp cận cảnh một cái thôi nha");
+      diễn đạt lại thứ đã có trong danh sách bằng chữ khác hoặc ngôn ngữ khác.
+Không chắc thì chọn "them_vat_the".
+SỐ LƯỢNG chỗ thêm KHÔNG quan trọng — chấm từng chỗ một. Năm chỗ "cam_nhan" vẫn là prompt tốt;
+một chỗ "them_vat_the" đã là prompt hỏng.
+
 Chỉ trả về đúng một JSON object, không giải thích.
 "menh_de" phải CHÉP NGUYÊN VĂN một mệnh đề được cho (chỉ chuỗi mệnh đề, không kèm tên nhóm)
 — không diễn đạt lại, không gộp, không tóm tắt:
 {
   "missing": [{"menh_de": "mệnh đề bị thiếu", "muc_do": "cot_loi"}],
-  "extra": ["thông tin bị thêm"],
+  "extra": [{"thong_tin": "chỗ bị thêm", "muc_do": "them_vat_the"}],
   "verdict": "pass"
 }
 verdict là "pass" khi missing rỗng và extra rỗng. Ngược lại là "fail"."""

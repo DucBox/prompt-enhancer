@@ -96,6 +96,21 @@ def missing_items(verdict: Dict[str, Any]) -> List[Dict[str, str]]:
     return items
 
 
+def extra_items(verdict: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Chuẩn hoá "extra" thành [{"thong_tin", "muc_do"}]; verdict cũ (chuỗi) coi là them_vat_the."""
+    items: List[Dict[str, str]] = []
+    for item in verdict.get("extra") or []:
+        if isinstance(item, dict):
+            text = str(item.get("thong_tin", "")).strip()
+            muc_do = str(item.get("muc_do", "them_vat_the")).strip().lower()
+        else:
+            text, muc_do = str(item).strip(), "them_vat_the"
+        if text:
+            items.append({"thong_tin": text,
+                          "muc_do": "cam_nhan" if muc_do == "cam_nhan" else "them_vat_the"})
+    return items
+
+
 def decide(verdict: Dict[str, Any], args: argparse.Namespace,
           required_facts: Optional[List[str]] = None) -> Dict[str, Any]:
     """Quyết định đạt/loại từ đầu ra của judge.
@@ -109,10 +124,18 @@ def decide(verdict: Dict[str, Any], args: argparse.Namespace,
     - thiếu mệnh đề "cot_loi" quá `--max_missing` -> loại;
     - thiếu mệnh đề "phu" (lấy nét sâu, ánh sáng ban ngày, nhỏ, ở góc dưới bên phải...) -> BỎ QUA,
       vì user thật không nói những thứ đó và model được train phải tự bổ sung;
-    - THÊM thì vẫn chặt như cũ: prompt đòi thứ không có trong ảnh sẽ dạy model bỏ qua yêu cầu.
+    - THÊM vật thể / màu / số lượng mới ("them_vat_the") -> loại ngay: prompt đòi thứ không có
+      trong ảnh sẽ dạy model bỏ qua yêu cầu của user;
+    - THÊM kiểu cảm nhận, lời dẫn ("cam_nhan": "trông đẹp mắt quá", "tôi đang làm đồ án") ->
+      BỎ QUA, bao nhiêu chỗ cũng được. Judge đã cân nhắc "có làm ảnh khác đi không" cho từng
+      chỗ, nên code không đặt thêm trần đếm: 5 chỗ tiểu tiết vô hại vẫn lành hơn 1 chỗ thêm
+      vật thể. User thật luôn nói thừa kiểu đó; ép sạch thì dữ liệu chỉ còn prompt khô cứng.
     """
     items = missing_items(verdict)
-    extra = verdict.get("extra") or []
+    extras = extra_items(verdict)
+    extra = [i["thong_tin"] for i in extras]
+    hard_extra = [i["thong_tin"] for i in extras if i["muc_do"] == "them_vat_the"]
+    soft_extra = [i["thong_tin"] for i in extras if i["muc_do"] == "cam_nhan"]
     core = [i["menh_de"] for i in items if i["muc_do"] == "cot_loi"]
     minor = [i["menh_de"] for i in items if i["muc_do"] == "phu"]
 
@@ -122,8 +145,8 @@ def decide(verdict: Dict[str, Any], args: argparse.Namespace,
         reasons.append("thiếu chủ đề chính: {}".format(lost_theme))
     elif len(core) > args.max_missing:
         reasons.append("thiếu {} mệnh đề cốt lõi".format(len(core)))
-    if extra:
-        reasons.append("thêm {} thông tin".format(len(extra)))
+    if hard_extra:
+        reasons.append("thêm {} thông tin".format(len(hard_extra)))
 
     return {
         "passed": not reasons,
@@ -132,6 +155,8 @@ def decide(verdict: Dict[str, Any], args: argparse.Namespace,
         "missing_cot_loi": core,
         "missing_phu": minor,
         "extra": extra,
+        "extra_them_vat_the": hard_extra,
+        "extra_cam_nhan": soft_extra,
     }
 
 
@@ -202,7 +227,9 @@ def main() -> None:
     rejected: List[Dict[str, Any]] = []
     reason_counts: Dict[str, int] = {}
     minor_counts: Dict[str, int] = {}
+    soft_extra_counts: Dict[str, int] = {}
     n_passed_with_minor = 0
+    n_passed_with_soft_extra = 0
 
     for row in rows:
         path = cache_dir / "{}.json".format(key_of(row))
@@ -211,9 +238,13 @@ def main() -> None:
         result = decide(io_utils.read_json(path), args, required_facts_of(row))
         for fact in result["missing_phu"]:
             minor_counts[fact] = minor_counts.get(fact, 0) + 1
+        for text in result["extra_cam_nhan"]:
+            soft_extra_counts[text] = soft_extra_counts.get(text, 0) + 1
         if result["passed"]:
             if result["missing_phu"]:
                 n_passed_with_minor += 1
+            if result["extra_cam_nhan"]:
+                n_passed_with_soft_extra += 1
             passed.append(row)
         else:
             rejected.append({**row, "reject": result})
@@ -237,6 +268,8 @@ def main() -> None:
         # Mệnh đề judge chấm là phụ -> bỏ qua. Soi bảng này để biết judge có nới tay quá không.
         "n_passed_with_missing_phu": n_passed_with_minor,
         "missing_phu_top": dict(sorted(minor_counts.items(), key=lambda kv: -kv[1])[:30]),
+        "n_passed_with_extra_cam_nhan": n_passed_with_soft_extra,
+        "extra_cam_nhan_top": dict(sorted(soft_extra_counts.items(), key=lambda kv: -kv[1])[:30]),
         "per_level": {},
     }
     for level in ("short", "medium", "long"):
@@ -255,6 +288,10 @@ def main() -> None:
         print("\n--- Bỏ qua (judge chấm là phụ), 10 mệnh đề hay thiếu nhất ---")
         for fact, count in sorted(minor_counts.items(), key=lambda kv: -kv[1])[:10]:
             print("  {:<40} {}".format(fact[:40], count))
+    if soft_extra_counts:
+        print("\n--- Bỏ qua (judge chấm là cảm nhận), 10 chỗ thêm hay gặp nhất ---")
+        for text, count in sorted(soft_extra_counts.items(), key=lambda kv: -kv[1])[:10]:
+            print("  {:<40} {}".format(text[:40], count))
     if reason_counts:
         print("\n--- Lý do loại ---")
         for reason, count in sorted(reason_counts.items(), key=lambda kv: -kv[1]):

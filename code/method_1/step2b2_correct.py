@@ -94,7 +94,7 @@ def main() -> None:
             messages = prompts.build_step2b2_messages(
                 row["checklist"],
                 reject.get("missing_cot_loi", reject.get("missing", [])),
-                reject.get("extra", []),
+                reject.get("extra_them_vat_the", reject.get("extra", [])),
                 row["user_prompt"],
             )
             raw = writer.chat(messages, temperature=args.temperature, max_tokens=args.max_tokens)
