@@ -116,8 +116,18 @@ mạng — dùng để soi prompt trước khi đốt tiền.
   (đầu vào + system prompt) — 1a đổi kết quả hoặc sửa prompt 1b thì ảnh đó tự được gọi lại.
 - **Model chấm lọc riêng.** Step 2b ưu tiên `JUDGE_BASE_URL` / `JUDGE_MODEL` nếu `.env`
   có khai báo — nên dùng model khác họ với model sinh để tránh thiên vị.
+- **Judge chấm mức quan trọng, rule chỉ chặn phần cốt lõi.** Mỗi mệnh đề THIẾU được judge gắn
+  `muc_do`: `cot_loi` (chủ thể, món ăn, trang phục, địa danh, thuật ngữ văn hoá, số lượng / màu
+  của chủ thể chính, hành động chính, bối cảnh có bản sắc) hoặc `phu` (lấy nét sâu, ánh sáng ban
+  ngày, nhỏ, ở góc dưới bên phải...); không chắc thì chấm `cot_loi`. Code chỉ loại khi thiếu
+  mệnh đề chủ đề chính, thiếu `cot_loi` quá `--max_missing` (mặc định 0), hoặc có THÊM thông
+  tin. Mệnh đề `phu` được BỎ QUA — user thật không nói những thứ đó, và model được train phải
+  tự bổ sung. THÊM vẫn chặt như cũ vì prompt đòi thứ không có trong ảnh sẽ dạy model bỏ qua yêu
+  cầu của user. `report.json` ghi `missing_phu_top` và `n_passed_with_missing_phu` để soi lại
+  xem judge có nới tay quá không; verdict cũ (danh sách chuỗi, không nhãn) được coi là `cot_loi`.
 - **Sửa lại prompt bị loại (`--retry_rejected`).** Mặc định TẮT. Bật lên thì sau step 2b,
-  `step2b2_correct.py` đưa đúng lý do bị loại (thiếu/thừa) cho model sửa lại — CHỈ sửa
+  `step2b2_correct.py` đưa đúng lý do bị loại (thiếu `cot_loi` / thừa, KHÔNG nhồi mệnh đề phụ
+  đã bỏ qua) cho model sửa lại — CHỈ sửa
   đúng phần bị nêu lỗi, không viết lại từ đầu — rồi chấm lại bằng đúng judge của 2b
   (kể cả ràng buộc chủ đề chính `required_facts`). Đạt thì gộp vào tập đạt (`corrected: true`,
   giữ `original_prompt` để audit); vẫn fail thì mới thật sự loại — **retry đúng 1 lần**,

@@ -579,11 +579,25 @@ Nhưng phần vị trí CỤ THỂ vẫn phải đúng — trái/phải, tay/tai
     vẫn tính là THIẾU (không được bỏ qua chỉ vì đây là mệnh đề vị trí).
   - Mệnh đề "ở tai phải thanh đồng", prompt không nhắc bên nào cả → THIẾU.
 
+CHẤM MỨC QUAN TRỌNG CHO MỖI MỆNH ĐỀ THIẾU ("muc_do") — đây là phần QUYẾT ĐỊNH, hãy cân nhắc kỹ.
+Tự hỏi: nếu đưa prompt này cho một AI vẽ ảnh, thiếu mệnh đề đó thì bức ảnh sinh ra có còn ĐÚNG
+thứ người dùng muốn không?
+  - "cot_loi" — thiếu nó thì ảnh ra SAI thứ, hoặc mất đúng cái làm nên bức ảnh này:
+      chủ thể, món ăn, trang phục, địa danh, thuật ngữ văn hoá Việt Nam;
+      số lượng của chủ thể chính; màu sắc / chất liệu của chủ thể chính;
+      hành động chính đang diễn ra; bối cảnh có bản sắc (chợ nổi, phố cổ, cánh đồng lúa).
+  - "phu" — thiếu nó ảnh vẫn đúng yêu cầu, chỉ khác đi ở chi tiết nhỏ:
+      thông số máy ảnh và hậu kỳ (lấy nét sâu, độ sâu trường ảnh nông, cỡ cảnh, góc máy);
+      ánh sáng và tính từ thẩm mỹ chung chung (ánh sáng ban ngày, sống động, sạch sẽ);
+      tính từ mơ hồ (nhỏ, dày, rộng, mờ); vị trí vụn trong khung hình (ở góc dưới bên phải);
+      chi tiết của vật phụ ở hậu cảnh.
+Không chắc thì chọn "cot_loi".
+
 Chỉ trả về đúng một JSON object, không giải thích.
-Mỗi phần tử trong "missing" phải CHÉP NGUYÊN VĂN một mệnh đề được cho (chỉ chuỗi mệnh đề, không
-kèm tên nhóm) — không diễn đạt lại, không gộp, không tóm tắt:
+"menh_de" phải CHÉP NGUYÊN VĂN một mệnh đề được cho (chỉ chuỗi mệnh đề, không kèm tên nhóm)
+— không diễn đạt lại, không gộp, không tóm tắt:
 {
-  "missing": ["mệnh đề bị thiếu"],
+  "missing": [{"menh_de": "mệnh đề bị thiếu", "muc_do": "cot_loi"}],
   "extra": ["thông tin bị thêm"],
   "verdict": "pass"
 }

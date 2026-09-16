@@ -89,8 +89,12 @@ def main() -> None:
 
         def process(row: Dict[str, Any]) -> Optional[str]:
             reject = row.get("reject", {})
+            # Chỉ bắt sửa mệnh đề CỐT LÕI; mệnh đề phụ đã được bỏ qua ở 2b thì cũng không
+            # nhồi vào đây, tránh prompt bị độn chi tiết vụn cho đủ checklist.
             messages = prompts.build_step2b2_messages(
-                row["checklist"], reject.get("missing", []), reject.get("extra", []),
+                row["checklist"],
+                reject.get("missing_cot_loi", reject.get("missing", [])),
+                reject.get("extra", []),
                 row["user_prompt"],
             )
             raw = writer.chat(messages, temperature=args.temperature, max_tokens=args.max_tokens)

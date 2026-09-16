@@ -1000,6 +1000,51 @@ class TestFilterDecision(unittest.TestCase):
         out = s2b.decide(verdict, _Args(), required_facts=["nhóm người làm gốm"])
         self.assertTrue(out["passed"])
 
+    def test_minor_missing_is_ignored_even_at_zero_tolerance(self):
+        """Ý user: rule chỉ chặn thông tin QUAN TRỌNG, mệnh đề phụ để model judge tự quyết
+        rồi bỏ qua -- user thật không bao giờ nói 'lấy nét sâu', 'độ sâu trường ảnh nông'."""
+        verdict = {"missing": [{"menh_de": "lấy nét sâu", "muc_do": "phu"},
+                               {"menh_de": "ánh sáng ban ngày", "muc_do": "phu"}],
+                   "extra": []}
+        out = s2b.decide(verdict, _Args())
+        self.assertTrue(out["passed"])
+        self.assertEqual(out["missing_phu"], ["lấy nét sâu", "ánh sáng ban ngày"])
+        self.assertEqual(out["missing_cot_loi"], [])
+
+    def test_core_missing_still_fails_when_judge_labels_it(self):
+        verdict = {"missing": [{"menh_de": "áo dài", "muc_do": "cot_loi"},
+                               {"menh_de": "nhỏ", "muc_do": "phu"}],
+                   "extra": []}
+        out = s2b.decide(verdict, _Args())
+        self.assertFalse(out["passed"])
+        self.assertIn("thiếu 1 mệnh đề cốt lõi", out["reasons"][0])
+
+    def test_theme_fact_fails_even_when_judge_calls_it_minor(self):
+        """Chủ đề chính do 1a chốt -- judge chấm nhầm là phụ cũng KHÔNG được cho qua."""
+        verdict = {"missing": [{"menh_de": "nhóm người làm gốm", "muc_do": "phu"}], "extra": []}
+        out = s2b.decide(verdict, _Args(), required_facts=["nhóm người làm gốm"])
+        self.assertFalse(out["passed"])
+        self.assertIn("thiếu chủ đề chính", out["reasons"][0])
+
+    def test_extra_stays_strict_regardless_of_labels(self):
+        verdict = {"missing": [{"menh_de": "mờ", "muc_do": "phu"}], "extra": ["con mèo"]}
+        self.assertFalse(s2b.decide(verdict, _Args())["passed"])
+
+    def test_legacy_string_missing_counts_as_core(self):
+        """Verdict cũ (danh sách chuỗi) không có nhãn -- phải coi là cốt lõi, không nới lỏng."""
+        items = s2b.missing_items({"missing": ["áo dài", {"menh_de": "mờ", "muc_do": "phu"}]})
+        self.assertEqual(items, [{"menh_de": "áo dài", "muc_do": "cot_loi"},
+                                 {"menh_de": "mờ", "muc_do": "phu"}])
+        self.assertFalse(s2b.decide({"missing": ["áo dài"], "extra": []}, _Args())["passed"])
+
+    def test_unknown_label_is_treated_as_core(self):
+        verdict = {"missing": [{"menh_de": "áo dài", "muc_do": "khong_biet"}], "extra": []}
+        self.assertEqual(s2b.decide(verdict, _Args())["missing_cot_loi"], ["áo dài"])
+
+    def test_judge_prompt_defines_importance_labels(self):
+        for phrase in ("muc_do", "cot_loi", "phu", 'Không chắc thì chọn "cot_loi"'):
+            self.assertIn(phrase, prompts.STEP2B_SYSTEM)
+
     def test_no_theme_falls_back_to_normal_tolerance(self):
         class Tolerant(_Args):
             max_missing = 1

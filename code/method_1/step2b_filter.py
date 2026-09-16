@@ -42,7 +42,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--temperature", type=float, default=0.0)
     p.add_argument("--max_tokens", type=int, default=1024)
     p.add_argument("--max_missing", type=int, default=0,
-                   help="Số mệnh đề được phép thiếu (mặc định 0)")
+                   help="Số mệnh đề CỐT LÕI được phép thiếu (mặc định 0). Mệnh đề judge chấm "
+                        "là phụ luôn được bỏ qua, không tính vào ngưỡng này.")
     p.add_argument("--overwrite", action="store_true")
     p.add_argument("--dry_run", action="store_true")
     p.add_argument("--ignore_judge", action="store_true",
@@ -77,35 +78,59 @@ def reason_label(reason: str) -> str:
     return re.sub(r"\s*\d+\s+", " ", reason.split(":")[0]).strip()
 
 
+def missing_items(verdict: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Chuẩn hoá "missing" của judge thành [{"menh_de", "muc_do"}].
+
+    Judge trả object có nhãn `muc_do` (cot_loi | phu). Verdict cũ chỉ là danh sách chuỗi --
+    coi hết là "cot_loi" để không vô tình nới lỏng dữ liệu đã chấm trước đây.
+    """
+    items: List[Dict[str, str]] = []
+    for item in verdict.get("missing") or []:
+        if isinstance(item, dict):
+            text = str(item.get("menh_de", "")).strip()
+            muc_do = str(item.get("muc_do", "cot_loi")).strip().lower()
+        else:
+            text, muc_do = str(item).strip(), "cot_loi"
+        if text:
+            items.append({"menh_de": text, "muc_do": "phu" if muc_do == "phu" else "cot_loi"})
+    return items
+
+
 def decide(verdict: Dict[str, Any], args: argparse.Namespace,
           required_facts: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Quyết định đạt/loại từ đầu ra của judge, theo ngưỡng do CLI đặt.
+    """Quyết định đạt/loại từ đầu ra của judge.
 
     Chỉ xét THIẾU/THÊM so với checklist. Văn phong (dịch máy, liệt kê máy móc...)
     không phải tiêu chí loại bỏ ở đây — đó là việc của bước 2a.
 
-    `required_facts` là các mệnh đề CHỦ ĐỀ CHÍNH (1a rút từ high_level_description) --
-    thiếu bất kỳ mệnh đề nào thì loại NGAY, không phụ thuộc --max_missing. Không có ràng
-    buộc riêng này thì việc nới --max_missing > 0 để giảm tỉ lệ loại có thể cho lọt đúng
-    trường hợp nguy hiểm nhất: prompt lệch chủ đề (vd ảnh làm gốm mà prompt chỉ nói "hai
-    phụ nữ và một người đàn ông") nhưng vẫn đạt vì các mệnh đề thiếu nằm trong ngưỡng.
+    MODEL quyết định mệnh đề nào quan trọng (`muc_do`), code chỉ chặn phần cốt lõi:
+    - thiếu mệnh đề CHỦ ĐỀ CHÍNH (`required_facts`, 1a rút từ high_level_description) -> loại
+      ngay dù judge chấm nó là phụ;
+    - thiếu mệnh đề "cot_loi" quá `--max_missing` -> loại;
+    - thiếu mệnh đề "phu" (lấy nét sâu, ánh sáng ban ngày, nhỏ, ở góc dưới bên phải...) -> BỎ QUA,
+      vì user thật không nói những thứ đó và model được train phải tự bổ sung;
+    - THÊM thì vẫn chặt như cũ: prompt đòi thứ không có trong ảnh sẽ dạy model bỏ qua yêu cầu.
     """
-    missing = verdict.get("missing") or []
+    items = missing_items(verdict)
     extra = verdict.get("extra") or []
+    core = [i["menh_de"] for i in items if i["muc_do"] == "cot_loi"]
+    minor = [i["menh_de"] for i in items if i["muc_do"] == "phu"]
 
     reasons: List[str] = []
-    lost_theme = [f for f in required_facts or [] if f in missing]
+    lost_theme = [f for f in required_facts or [] if any(f == i["menh_de"] for i in items)]
     if lost_theme:
         reasons.append("thiếu chủ đề chính: {}".format(lost_theme))
-    elif len(missing) > args.max_missing:
-        reasons.append("thiếu {} mệnh đề".format(len(missing)))
+    elif len(core) > args.max_missing:
+        reasons.append("thiếu {} mệnh đề cốt lõi".format(len(core)))
     if extra:
         reasons.append("thêm {} thông tin".format(len(extra)))
 
     return {
         "passed": not reasons,
         "reasons": reasons,
-        "missing": missing,
+        "missing": [i["menh_de"] for i in items],
+        "missing_cot_loi": core,
+        "missing_phu": minor,
         "extra": extra,
     }
 
@@ -176,13 +201,19 @@ def main() -> None:
     passed: List[Dict[str, Any]] = []
     rejected: List[Dict[str, Any]] = []
     reason_counts: Dict[str, int] = {}
+    minor_counts: Dict[str, int] = {}
+    n_passed_with_minor = 0
 
     for row in rows:
         path = cache_dir / "{}.json".format(key_of(row))
         if not path.is_file():
             continue
         result = decide(io_utils.read_json(path), args, required_facts_of(row))
+        for fact in result["missing_phu"]:
+            minor_counts[fact] = minor_counts.get(fact, 0) + 1
         if result["passed"]:
+            if result["missing_phu"]:
+                n_passed_with_minor += 1
             passed.append(row)
         else:
             rejected.append({**row, "reject": result})
@@ -203,6 +234,9 @@ def main() -> None:
         "n_rejected": len(rejected),
         "pass_rate": round(len(passed) / n_judged, 4) if n_judged else 0.0,
         "reject_reasons": reason_counts,
+        # Mệnh đề judge chấm là phụ -> bỏ qua. Soi bảng này để biết judge có nới tay quá không.
+        "n_passed_with_missing_phu": n_passed_with_minor,
+        "missing_phu_top": dict(sorted(minor_counts.items(), key=lambda kv: -kv[1])[:30]),
         "per_level": {},
     }
     for level in ("short", "medium", "long"):
@@ -217,6 +251,10 @@ def main() -> None:
     print("\n--- Tỉ lệ đạt theo mức ---")
     for level, info in report["per_level"].items():
         print("  {:<8} {}/{}  = {:.1%}".format(level, info["passed"], info["n"], info["pass_rate"]))
+    if minor_counts:
+        print("\n--- Bỏ qua (judge chấm là phụ), 10 mệnh đề hay thiếu nhất ---")
+        for fact, count in sorted(minor_counts.items(), key=lambda kv: -kv[1])[:10]:
+            print("  {:<40} {}".format(fact[:40], count))
     if reason_counts:
         print("\n--- Lý do loại ---")
         for reason, count in sorted(reason_counts.items(), key=lambda kv: -kv[1]):
