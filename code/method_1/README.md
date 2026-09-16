@@ -104,7 +104,10 @@ mạng — dùng để soi prompt trước khi đốt tiền.
   có dấu, đồng nghĩa) chỉ để 1a chọn cách gọi tên; ảnh không thể hiện chủ đề gợi ý thì 1a bỏ
   qua (`khop_goi_y: false`). Code tự chèn chủ đề vào cả 3 mức; 2b loại ngay nếu judge báo thiếu
   bất kỳ mệnh đề chủ đề nào (`required_facts`), bất kể `--max_missing`. Sửa `topic_terms.json`
-  thì cache 1a của các ảnh có gợi ý thay đổi tự được gọi lại.
+  thì cache 1a của các ảnh có gợi ý thay đổi tự được gọi lại. Chủ đề tối đa 3 mệnh đề / 10 từ;
+  sai thì 1a gọi lại kèm danh sách lỗi (`--max_fix_attempts`, mặc định 2), hết lượt mới ghi vào
+  `step1a_decompose/failures.json` kèm ĐỦ danh sách lỗi (`errors`) và output cuối của LLM
+  (`last_output`) để soi.
 - **Hỏng mức nào bỏ mức đó.** Hết lượt sửa mà vẫn lỗi thì 1b giữ các mức tự hợp lệ và lồng
   nhau với nhau (hai mức hợp lệ mà không lồng nhau thì bỏ mức ít chi tiết hơn), ghi lý do vào
   `step1b_subjson/partial.json`. Chỉ ảnh không giữ được mức nào mới vào `failures.json` (kèm

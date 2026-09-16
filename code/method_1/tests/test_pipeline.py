@@ -337,6 +337,54 @@ class TestDecomposeValidation(unittest.TestCase):
     def test_judge_prompt_requires_verbatim_missing(self):
         self.assertIn("CHÉP NGUYÊN VĂN", prompts.STEP2B_SYSTEM)
 
+
+class TestDecomposeFixLoop(unittest.TestCase):
+    """1a gọi lại kèm lỗi; hết lượt thì báo lỗi ĐẦY ĐỦ + output cuối để soi được."""
+
+    def run_fixes(self, outputs, max_fix_attempts=2):
+        from types import SimpleNamespace
+
+        class FakeClient:
+            def __init__(self):
+                self.calls = 0
+                self.messages = None
+
+            def chat(self, messages, **kwargs):
+                self.calls += 1
+                self.messages = messages
+                return outputs[min(self.calls, len(outputs)) - 1]
+
+        client = FakeClient()
+        args = SimpleNamespace(max_fix_attempts=max_fix_attempts, temperature=0.0, max_tokens=10)
+        return client, s1a.decompose_with_fixes(client, SAMPLE_TARGET, None, args)
+
+    def bad_theme(self):
+        bad = json.loads(json.dumps(SAMPLE_DECOMP))
+        bad["chu_de_chinh"] = [{"rank": 0, "text": "nhóm bạn trẻ đứng tạo dáng chụp ảnh kỷ niệm"},
+                               {"rank": 1, "text": "trước Lăng Bác"}]
+        return json.dumps(bad)
+
+    def test_retries_with_error_list_then_accepts_fixed_output(self):
+        client, result = self.run_fixes([self.bad_theme(), json.dumps(SAMPLE_DECOMP)])
+        self.assertEqual(client.calls, 2)
+        self.assertEqual([f["text"] for f in result["chu_de_chinh"]],
+                         ["nhóm bạn chụp ảnh", "trước Lăng Bác"])
+        self.assertIn("chu_de_chinh có tổng 13 từ", client.messages[-1]["content"])
+
+    def test_failure_carries_every_error_and_last_output(self):
+        with self.assertRaises(s1a.DecomposeError) as ctx:
+            self.run_fixes([self.bad_theme()])
+        exc = ctx.exception
+        self.assertEqual(exc.last_output, self.bad_theme())
+        self.assertTrue(any("chu_de_chinh có tổng 13 từ" in e for e in exc.errors))
+        self.assertIn("chu_de_chinh có tổng 13 từ", str(exc))
+
+    def test_unparsable_output_is_kept_for_inspection(self):
+        with self.assertRaises(s1a.DecomposeError) as ctx:
+            self.run_fixes(["xin lỗi, tôi không thể"], max_fix_attempts=0)
+        self.assertEqual(ctx.exception.last_output, "xin lỗi, tôi không thể")
+        self.assertTrue(any("không đọc được JSON" in e for e in ctx.exception.errors))
+
     def test_normalize_keeps_theme_ranked_and_match_flag(self):
         messy = {"chu_de_chinh": [{"rank": 3, "text": "quanh bàn xoay gốm"},
                                   {"rank": 0, "text": "nhóm người làm gốm"}],

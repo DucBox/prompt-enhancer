@@ -7,7 +7,7 @@
                                    "background_facts", "style_facts", "field_priority",
                                    "goi_y_chu_de"}
             decompose.jsonl       gộp lại thành một file
-            failures.json
+            failures.json         ảnh hỏng, kèm danh sách lỗi và output cuối của LLM
 
 Phân rã ĐẦY ĐỦ mọi trường mang nội dung, mỗi mệnh đề một ý, bằng tiếng Việt, xếp hạng
 theo độ quan trọng TRONG TỪNG TRƯỜNG:
@@ -64,10 +64,49 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--temperature", type=float, default=0.0,
                    help="Để 0 cho deterministic — kết quả được cache và đóng băng")
     p.add_argument("--max_tokens", type=int, default=8192)
+    p.add_argument("--max_fix_attempts", type=int, default=2,
+                   help="Số lần gọi lại kèm danh sách lỗi khi đầu ra không hợp lệ")
     p.add_argument("--overwrite", action="store_true", help="Bỏ qua cache, gọi lại toàn bộ")
     p.add_argument("--dry_run", action="store_true",
                    help="Chỉ dựng messages và in ra, KHÔNG gọi model")
     return io_utils.add_common_args(p).parse_args()
+
+
+class DecomposeError(llm.LLMError):
+    """Kèm TOÀN BỘ lỗi và output cuối của model để soi được vì sao hỏng (failures.json)."""
+
+    def __init__(self, message: str, errors: List[str], last_output: Optional[str]) -> None:
+        super().__init__(message)
+        self.errors = errors
+        self.last_output = last_output
+
+
+def decompose_with_fixes(
+    client: Any, target: Dict[str, Any], hint: Optional[Dict[str, Any]],
+    args: argparse.Namespace,
+) -> Dict[str, Any]:
+    """Gọi LLM, sửa theo lỗi tối đa `max_fix_attempts` lần. Hết lượt vẫn sai -> DecomposeError."""
+    messages = prompts.build_step1a_messages(target, hint)
+    errors: List[str] = []
+    raw: Optional[str] = None
+    for _ in range(args.max_fix_attempts + 1):
+        raw = client.chat(messages, temperature=args.temperature,
+                          max_tokens=args.max_tokens, json_mode=True)
+        try:
+            result = llm.parse_json_response(raw)
+            errors = validate_decomposition(result, target)
+        except (ValueError, llm.LLMError) as exc:
+            result = None
+            errors = ["không đọc được JSON: {}".format(str(exc)[:200])]
+        if result is not None and not errors:
+            return normalize_decomposition(result)
+        messages = list(messages) + [
+            {"role": "assistant", "content": raw},
+            {"role": "user", "content": prompts.build_step1a_fix_message(errors)},
+        ]
+    raise DecomposeError(
+        "đầu ra không hợp lệ sau {} lần: {}".format(args.max_fix_attempts + 1, "; ".join(errors)),
+        errors, raw)
 
 
 def expected_style_fields(target: Dict[str, Any]) -> List[str]:
@@ -268,21 +307,15 @@ def main() -> None:
         print("model    : {}\n".format(client.model))
 
         def process(row: Dict[str, Any]) -> Optional[str]:
-            target = row["target_json"]
-            messages = prompts.build_step1a_messages(target, hints[row["id"]])
-            result = client.chat_json(
-                messages, temperature=args.temperature, max_tokens=args.max_tokens,
-            )
-            errors = validate_decomposition(result, target)
-            if errors:
-                raise llm.LLMError("đầu ra không hợp lệ: {}".format("; ".join(errors[:4])))
-            cleaned = normalize_decomposition(result)
+            cleaned = decompose_with_fixes(client, row["target_json"], hints[row["id"]], args)
             cleaned["goi_y_chu_de"] = hints[row["id"]]
             io_utils.write_json(cache_dir / "{}.json".format(row["id"]), cleaned)
             return row["id"]
 
         def on_error(row: Dict[str, Any], exc: Exception) -> None:
-            failures.append({"id": row["id"], "error": str(exc)[:400]})
+            failures.append({"id": row["id"], "error": str(exc)[:600],
+                             "errors": getattr(exc, "errors", None),
+                             "last_output": getattr(exc, "last_output", None)})
 
         llm.run_parallel(todo, process, workers=args.workers,
                          desc="phân rã", on_error=on_error)

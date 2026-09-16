@@ -375,6 +375,11 @@ def build_step1b_messages(sel_input: Dict[str, Any]) -> List[Dict[str, str]]:
     ]
 
 
+def build_step1a_fix_message(errors: List[str]) -> str:
+    return ("Kết quả vừa rồi CHƯA hợp lệ:\n- " + "\n- ".join(errors)
+            + "\nHãy trả lại JSON đầy đủ, sửa đúng các lỗi trên và giữ nguyên mọi luật khác.")
+
+
 def build_step1b_fix_message(errors: List[str]) -> str:
     return ("Lựa chọn vừa rồi CHƯA hợp lệ:\n- " + "\n- ".join(errors)
             + "\nHãy trả lại JSON đầy đủ cho cả ba mức, sửa đúng các lỗi trên và giữ nguyên "
